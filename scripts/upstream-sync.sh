@@ -325,10 +325,16 @@ cmd_apply() {
         git apply --3way "$ROOT/$patch"
       done
     fi
-    # Attributes introduced by a later commit do not retroactively convert files
-    # that earlier commits already wrote, so a replayed worktree can end up with
-    # CRLF scripts. Rewrite the working tree under the final rules.
-    git ls-files -z | git checkout-index -f -z
+    # Renormalize the working tree: line-ending rules introduced by a later
+    # commit do not retroactively convert files written by an earlier one, so a
+    # replay can leave CRLF scripts that fail to run. Safe only on a freshly
+    # replayed worktree, so refuse when anything is uncommitted.
+    if [ -z "$(git status --porcelain)" ]; then
+      git rm -r --cached -q . && git reset --hard -q
+      echo "==> working tree renormalized"
+    else
+      echo "skip renormalize: worktree not clean" >&2
+    fi
   ) || {
     echo "replay failed; resolve in: $target" >&2
     echo "  series mode: git am --abort to back out, or USE_SERIES=0 for file patches" >&2
