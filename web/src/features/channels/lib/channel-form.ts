@@ -263,6 +263,7 @@ export const channelFormSchema = z
     // Channel extra settings (stored in setting JSON, not sent directly)
     force_format: z.boolean().optional(),
     thinking_to_content: z.boolean().optional(),
+    daily_token_limit: z.number().int().min(0).optional(),
     proxy: z
       .string()
       .optional()
@@ -460,6 +461,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   // Channel extra settings
   force_format: false,
   thinking_to_content: false,
+  daily_token_limit: 0,
   proxy: '',
   http_protocol: HTTP_PROTOCOL_AUTO,
   http2_connection_shards: 1,
@@ -507,6 +509,7 @@ export function transformChannelToFormDefaults(
     task_extend_plugin_keys: [] as string[],
     force_format: false,
     thinking_to_content: false,
+    daily_token_limit: 0,
     proxy: '',
     http_protocol: HTTP_PROTOCOL_AUTO as 'auto' | 'http1',
     http2_connection_shards: 1,
@@ -529,6 +532,7 @@ export function transformChannelToFormDefaults(
         task_extend_plugin_keys: readTaskExtendPluginKeys(channel.type, parsed),
         force_format: parsed.force_format || false,
         thinking_to_content: parsed.thinking_to_content || false,
+        daily_token_limit: Number(parsed.daily_token_limit) || 0,
         proxy: parsed.proxy || '',
         http_protocol: protocol,
         http2_connection_shards: protocol === HTTP_PROTOCOL_HTTP1 ? 1 : shards,
@@ -669,6 +673,10 @@ export function buildSettingJSON(formData: ChannelFormValues): string {
         : undefined,
     force_format: formData.force_format || false,
     thinking_to_content: formData.thinking_to_content || false,
+    daily_token_limit:
+      formData.daily_token_limit && formData.daily_token_limit > 0
+        ? formData.daily_token_limit
+        : undefined,
     proxy: formData.proxy?.trim() || '',
     pass_through_body_enabled: formData.pass_through_body_enabled === true,
     responses_websocket_enabled:

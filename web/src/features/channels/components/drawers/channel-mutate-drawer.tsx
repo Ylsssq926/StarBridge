@@ -298,6 +298,7 @@ const SENSITIVE_FORM_FIELDS = [
   'azure_responses_version',
   'force_format',
   'thinking_to_content',
+  'daily_token_limit',
   'proxy',
   'http_protocol',
   'http2_connection_shards',
@@ -1795,6 +1796,37 @@ export function ChannelMutateDrawer({
       }
     },
     [onOpenChange, form, isSubmitting, showProviderPicker, providerTarget]
+  )
+
+  const dailyTokenLimitFields = (
+    <FormField
+      control={form.control}
+      name='daily_token_limit'
+      render={({ field }) => (
+        <FormItem>
+          <FormLabel>{t('Daily Token Limit')}</FormLabel>
+          <FormControl>
+            <Input
+              type='number'
+              min={0}
+              step={1}
+              placeholder={t('0 means unlimited')}
+              {...field}
+              value={field.value ?? 0}
+              onChange={(event) =>
+                field.onChange(Number(event.target.value) || 0)
+              }
+            />
+          </FormControl>
+          <FormDescription>
+            {t(
+              'Maximum billable input + output tokens per channel per day. 0 means unlimited.'
+            )}
+          </FormDescription>
+          <FormMessage />
+        </FormItem>
+      )}
+    />
   )
 
   const proxyFields = (
@@ -4786,6 +4818,7 @@ export function ChannelMutateDrawer({
                 className='space-y-4 disabled:opacity-60'
               >
                 {taskPollingFields}
+                {dailyTokenLimitFields}
                 {proxyFields}
                 {httpProtocolFields}
                 {httpShardsFields}
