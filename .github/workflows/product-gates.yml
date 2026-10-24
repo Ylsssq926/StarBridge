@@ -56,8 +56,15 @@ jobs:
       - name: Channel feature tests
         working-directory: web
         run: bunx vitest run src/features/channels
+      - name: Keep the built bundle for the replay job
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+          retention-days: 1
 
   sync-integrity:
+    needs: frontend
     runs-on: ubuntu-latest
     env:
       UPSTREAM_BASE: v1.0.0-rc.46
@@ -82,7 +89,17 @@ jobs:
           git config user.name "Product Gates CI"
           git config user.email "ci@invalid"
           ./scripts/upstream-sync.sh apply "$UPSTREAM_BASE"
+      - name: Provide web/dist for go:embed
+        uses: actions/download-artifact@v4
+        with:
+          # main.go embeds web/dist, so the replayed tree needs a bundle.
+          name: web-dist
+          path: web-dist
+      - name: Build and test the replayed tree
+        run: |
           worktree="../new-api-$UPSTREAM_BASE"
+          mkdir -p "$worktree/web/dist"
+          cp -R web-dist/. "$worktree/web/dist/"
           cd "$worktree"
           go build ./...
           go test ./common -run Daily -count=1

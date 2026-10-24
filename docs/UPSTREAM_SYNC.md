@@ -192,12 +192,23 @@ go test ./service -run 'TestSettle_|TestTaskBilling|TestLogTaskConsumption|TestR
 docker compose -f docker-compose.poc.yml config --quiet
 ```
 
-端到端门禁（需要 compose 栈 + `node scripts/mock-upstream.cjs`）：
+以上清单已落地为 `.github/workflows/product-gates.yml`（独立于上游 `ci.yml`，避免扩大冲突面），三个 job：
+
+- `backend`：主模块 + relaykit 构建，日限额 / 选路 / 任务计费回归
+- `frontend`：`bun install --frozen-lockfile` + `typecheck` + 渠道单测，并保留 `web/dist` 产物
+- `sync-integrity`：`status` → `export-series` → `verify-series` → 把 series 重放到基线 tag 的工作树并在其中构建与跑测试 → 用示例 env 校验 compose
+
+一条只有 CI 演练才暴露的规则：`main.go` 用 `go:embed web/dist`，**重放出的工作树若没有前端产物，`go build ./...` 会直接失败**。`upstream-sync.sh check` 会自动复用或构建 `web/dist`，CI 里由 `frontend` job 的产物补上，手工在新工作树里跑 `go build` 也要先准备它。
+
+端到端门禁（需要 compose 栈 + `node scripts/mock-upstream.cjs`，发布前手工执行）：
 
 ```bash
-node scripts/verify-daily-limit.mjs      # 日限额 10 项边界
+node scripts/verify-daily-limit.mjs      # 日限额 14 项边界（两个预算）
 node scripts/verify-compat.mjs           # 协议/接线 7 项
 node scripts/verify-channel-types.mjs    # 17 种渠道类型的面板适配
+docker run -d --name nap-sqlite -p 127.0.0.1:3811:3000 new-api-daily-limit:<version>
+node scripts/verify-sqlite-setup.mjs     # SQLite + /setup 首启 10 项（最小部署形态）
+docker rm -f nap-sqlite
 ```
 
 可选：
