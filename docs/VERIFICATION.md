@@ -195,9 +195,39 @@ docker compose -f docker-compose.poc.yml config --quiet
 node scripts/mock-upstream.cjs &            # 监听 3999，usage 固定 5+5
 node scripts/verify-daily-limit.mjs          # 10 项日限额边界
 node scripts/verify-compat.mjs               # 7 项协议/接线兼容
+node scripts/verify-channel-types.mjs        # 17 种渠道类型面板适配 + 限额生效
 # 切换选路或关闭 Redis 复跑：
 printf 'services:\n  new-api:\n    environment:\n      - MEMORY_CACHE_ENABLED=false\n' > docker-compose.poc.override.yml
 docker compose -f docker-compose.poc.yml up -d --force-recreate new-api
 node scripts/verify-daily-limit.mjs
 rm docker-compose.poc.override.yml
+
+# 6. 上游重放（series 是生成物，缺失时 apply 会自动导出）
+./scripts/upstream-sync.sh export-series v1.0.0-rc.46
+./scripts/upstream-sync.sh verify-series
+./scripts/upstream-sync.sh apply v1.0.0-rc.47
+./scripts/upstream-sync.sh check ../new-api-v1.0.0-rc.47
 ```
+
+## 12. 分支化与上游跟进机制加固（本轮）
+
+| 验证 | 结果 |
+|---|---|
+| 私有改动落在本地分支 | `product/daily-limit`，基线 `v1.0.0-rc.46` 之上 9 个提交（后端 / 前端 / 成品层 / gitattributes / 同步机制 / 品牌别名 / 行尾正规化 / series 生成物化） |
+| `export-series` | 9 个 patch、68 个功能文件；提交范围与 series 覆盖一致 |
+| `verify-series` 负向 | 故意留一处未提交功能改动 → `rc=1` 并指名 `model/channel_daily_limit.go`；还原后 `rc=0` |
+| 干净树重放（无 series 目录） | `apply v1.0.0-rc.46` 自动导出 → `git am -3` 9 个提交全部 Applying 成功 → `==> working tree renormalized` |
+| 重放后行尾 | `verify-compat.mjs` / `mock-upstream.cjs` / `verify-channel-types.mjs` CR=0（修复前 180 / 78 / 249） |
+| 重放 worktree 构建 | `go build ./...` + relaykit + 日限额/选路/任务计费回归通过 |
+| 成品 0.1.2 | `new-api-daily-limit:{local,0.1.2}` + 别名 `starbridge-gateway:{local,0.1.2}`；三套件复跑 10/10、7/7、15/15 |
+| 版本 tag 纪律 | 0.1.0 曾被同 tag 重建覆盖（如实记录）；此后策略写入 `docs/UPSTREAM_SYNC.md` §3.7：内容变化必须升 `PRODUCT_VERSION` |
+
+自审发现的真实缺陷（均已修并留证）：
+
+1. `daily_token_limit` 未登记进面板"其他设置"区块 → 编辑时配置区跳回 connection。
+2. 只设日限额的渠道不显示"已配置"标记。
+3. `.mjs` / `.cjs` / `.patch` 无 eol 规则 → Windows 全新检出得到 CRLF 脚本（升级当天才炸）。
+4. `.gitattributes` 修复在 `git am` 的重放顺序下不追溯生效 → 重放末尾正规化工作区。
+5. `patches/series/` 入库导致永久脏工作区（`[PATCH n/m]` 计数每次导出都变）→ 改为生成物，`apply` 缺失时自动导出。
+
+仍未闭环（外部依赖，非机制问题）：真实 Kiro/Antigravity 账号、真实国内厂商 Key 与出图、生图/按次计费任务的日限额计量（迭代计划 P1，任务 #16）。
