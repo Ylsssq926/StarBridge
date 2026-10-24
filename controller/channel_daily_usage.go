@@ -52,7 +52,10 @@ func GetChannelDailyUsage(c *gin.Context) {
 		return
 	}
 
-	channels, err := model.GetAllChannels(0, 0, true, true)
+	// selectAll=false is deliberate: it makes GORM omit the `key` column, so this
+	// read never loads upstream credentials into memory just to report counters.
+	// Limit(-1) removes pagination instead of disabling it with a magic number.
+	channels, err := model.GetAllChannels(0, -1, false, true)
 	if err != nil {
 		common.ApiError(c, err)
 		return
