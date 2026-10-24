@@ -104,6 +104,82 @@ patch_files() {
   grep -E '^diff --git a/' "$1" | sed -E 's|^diff --git a/[^ ]+ b/||'
 }
 
+# Commit-derived series: the durable form now that the product layer lives on a
+# branch. format-patch keeps author/date per change, so an upgrade replays the
+# same history instead of one opaque working-tree diff.
+UPSTREAM_BASE="${UPSTREAM_BASE:-v1.0.0-rc.46}"
+SERIES_DIR="${SERIES_DIR:-$PATCH_DIR/series}"
+
+series_change_files() {
+  local base="${1:-$UPSTREAM_BASE}"
+  git diff --name-only "$base"..HEAD | while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    is_functional_path "$path" && echo "$path"
+  done
+}
+
+series_covered_files() {
+  cat "$SERIES_DIR"/*.patch | grep -E '^diff --git a/' | sed -E 's|^diff --git a/[^ ]+ b/||' | sort -u
+}
+
+cmd_export_series() {
+  local base="${1:-$UPSTREAM_BASE}"
+  if ! git rev-parse --verify --quiet "$base" >/dev/null; then
+    echo "unknown base ref: $base (set UPSTREAM_BASE)" >&2
+    return 1
+  fi
+  if [ -z "$(git status --porcelain)" ] && [ "$(git log --oneline "$base"..HEAD | wc -l)" -eq 0 ]; then
+    echo "no commits above $base" >&2
+    return 1
+  fi
+  mkdir -p "$PATCH_DIR"
+  rm -rf "${SERIES_DIR:?}"
+  mkdir -p "$SERIES_DIR"
+  git format-patch --binary "$base"..HEAD -o "$SERIES_DIR"
+  cmd_verify_series "$base"
+}
+
+cmd_verify_series() {
+  local base="${1:-$UPSTREAM_BASE}"
+  if [ ! -d "$SERIES_DIR" ] || ! ls "$SERIES_DIR"/*.patch >/dev/null 2>&1; then
+    echo "no series found in $SERIES_DIR; run: $0 export-series [$base]" >&2
+    return 1
+  fi
+  local covered want missing="" extra=""
+  covered="$(series_covered_files)"
+  want="$(series_change_files "$base")"
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    echo "$covered" | grep -qxF "$path" || missing="$missing $path"
+  done <<< "$want"
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    is_functional_path "$path" || continue
+    echo "$want" | grep -qxF "$path" || extra="$extra $path"
+  done <<< "$covered"
+  echo "series: $SERIES_DIR ($(ls "$SERIES_DIR"/*.patch | wc -l) patches, base $base)"
+  echo "functional files covered: $(echo "$covered" | grep -c .)"
+  if [ -n "$missing" ]; then
+    echo "NOT COVERED by series:$missing" >&2
+    return 1
+  fi
+  if [ -n "$extra" ]; then
+    echo "series contains files outside the commit range:$extra" >&2
+    return 1
+  fi
+  dirty=""
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    is_functional_path "$path" && dirty="$dirty $path"
+  done < <(git status --porcelain | sed -E 's/^.{3}//' | sed -E 's/^.* -> //')
+  if [ -n "$dirty" ]; then
+    echo "uncommitted functional changes:$dirty" >&2
+    echo "commit them before exporting, or the series will not match the branch" >&2
+    return 1
+  fi
+  echo "export-series: OK (commits == series)"
+}
+
 cmd_verify_patch() {
   local file="${1:-$PATCH_FILE}"
   if [ ! -f "$file" ]; then
@@ -238,12 +314,18 @@ cmd_apply() {
   git worktree add "$target" "$tag"
   (
     cd "$target"
-    for patch in $PATCH_FILES; do
-      echo "applying $patch"
-      git apply --3way "$ROOT/$patch"
-    done
+    if [ "${USE_SERIES:-1}" = "1" ] && ls "$ROOT/$SERIES_DIR"/*.patch >/dev/null 2>&1; then
+      echo "applying commit series from $SERIES_DIR with git am -3"
+      git am -3 --no-keep-cr "$ROOT/$SERIES_DIR"/*.patch
+    else
+      for patch in $PATCH_FILES; do
+        echo "applying $patch"
+        git apply --3way "$ROOT/$patch"
+      done
+    fi
   ) || {
-    echo "patch apply needs manual conflict resolution in: $target" >&2
+    echo "replay failed; resolve in: $target" >&2
+    echo "  series mode: git am --abort to back out, or USE_SERIES=0 for file patches" >&2
     exit 1
   }
   echo "created: $target"
@@ -257,14 +339,17 @@ cmd_apply() {
 case "${1:-status}" in
   status) cmd_status ;;
   export) cmd_export ;;
+  export-series) cmd_export_series "${2:-}" ;;
+  verify-series) cmd_verify_series "${2:-}" ;;
   verify-patch) cmd_verify_patch "${2:-}" ;;
   tooling) cmd_tooling "${2:-}" ;;
   check) cmd_check "${2:-$ROOT}" ;;
   check-full) cmd_check_full "${2:-$ROOT}" ;;
   apply) cmd_apply "${2:-}" ;;
   *)
-    echo "usage: $0 {status|export|verify-patch [file]|tooling <dir>|check [dir]|check-full [dir]|apply <tag>}" >&2
-    echo "  PATCH_FILES overrides the patch list (default: main series)" >&2
+    echo "usage: $0 {status|export|export-series [base]|verify-series [base]|verify-patch [file]|tooling <dir>|check [dir]|check-full [dir]|apply <tag>}" >&2
+    echo "  apply replays patches/series with git am -3 by default (base: UPSTREAM_BASE)" >&2
+    echo "  USE_SERIES=0 falls back to PATCH_FILES; PATCH_FILES overrides the file-patch list" >&2
     echo "  COPY_TOOLING=0 skips copying the product layer into a new worktree" >&2
     exit 2
     ;;
