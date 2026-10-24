@@ -53,6 +53,8 @@
 
 | 一键升级演练 `drill` | 成功路径：`drill v1.0.0-rc.46` 退出码 0，一条命令跑完"overlap 预估(0) → 重导 23 个 patch（74 个功能文件，commits == series）→ 自动丢弃上一轮干净的重放树并重建 → `git am -3` 23 个提交全部 Applying → renormalize → `go build` + relaykit + 三组回归 → 重放树内 `bun install`（1187 包 / 163s）→ `tsgo -b` 真跑（`==> typecheck: ran`）→ `DRILL OK`"。失败路径：`drill upstream/main` 退出码 1，把第一个阻塞点原样交回给人 —— `Patch failed at 0001`、冲突文件 `model/channel_constraint.go`（1 处标记块）、已应用 0 个提交，并打印 `am --continue` / `am --abort` + `worktree remove` 的具体命令；按打印步骤回退后 `git worktree list` 只剩主工作树，无残留 |
 | 未知 ref / 未提交改动的拒绝路径 | `drill v9.9.9-does-not-exist`：overlap 打印 `skipped`，随后 fail-closed 覆盖率校验发现 `.github/workflows/product-gates.yml` 有未提交功能改动 → 拒绝导出 series，退出码 1，**不建任何 worktree、无残留目录**（`.github/` 属功能层，不在产品层白名单内，所以 CI 文件的改动也必须先进提交） |
+| 全量冲突面演练（跑完 25 个 patch，不止第一个阻塞点） | 在 `upstream/main`（`e835b1bfc`，超前基线 23 个提交）上把 `drill` 卡住的两处依次解决后 `am --continue`：**25 个提交全部重放成功，只有 2 次人工介入，且都落在 `model/channel_constraint.go`** —— ① patch `0001`：上游新增的 `case dto.FilterTaskPluginEndpoint` 与我们的 `case dto.FilterDailyTokenLimit` 落在同一位置，取并集即可（同 patch 其余 6 个文件已自动合并）；② patch `0011`：一处函数注释文案（上游写 "first violated filter in filterEvalOrder"，我方改成 "first violated filter kind"，因为日预算已脱离 `filterEvalOrder`）→ 取我方。结果：升级树相对 main 领先 25 个提交、改动 64 个文件，`SKIP_TYPECHECK=1 check` 退出码 0（`go build ./...` + relaykit + common/model/service 三组回归全绿），演练树用文档给出的 `worktree remove --force` 清掉，无残留 |
+| main 上的前端类型门仍不可用 | 该 ref 的 `web/package.json` 是 `"typecheck": "bun check -b"`，本地 bun 1.3.14 没有 `check` 子命令 → 升级树的前端类型门跑不了，本次显式 `SKIP_TYPECHECK=1` 跳过并留痕。跟 main 之前必须二选一：把 typecheck 入口改成可运行的命令，或把本地/CI 的 bun 升到支持 `bun check` 的版本。这正是 `check` 改成硬失败之后要暴露的那类问题（迭代计划 P5 未闭环项） |
 | 定时演练 workflow | `.github/workflows/upstream-drill.yml`：两个 workflow 均通过 `yaml.parse`（jobs/triggers/`continue-on-error` 逐项核对），drill 与 summarise 两个 `run` 块抽出后 `bash -n` 通过；summarise 更拿**真实日志**跑过两遍——失败演练日志渲染出 `DRILL FAILED` + 冲突文件，成功演练日志渲染出 `DRILL OK` + `overlap … 0 file(s)`。**未验证**：该 workflow 还没在 GitHub runner 上真跑过（本地无 make/无 hosted runner），且 `schedule` 只在仓库默认分支生效 |
 | 类型门不再"看似通过" | 演练首轮暴露：重放树没有 `web/node_modules`，旧 `check` 打一行"上游可能换了命令"的告警就继续，类型门其实一行没跑。改为缺依赖先 `bun install --frozen-lockfile`（实测 1187 包 / 178.7s）再跑类型门，依赖齐了却找不到类型入口则**判失败**并给出 `SKIP_TYPECHECK=1` 的显式退路 |
 | 重叠面预估（先知道有多大再动手） | `status` 与 `drill` 开头新增一行 overlap：`upstream/main` 与本方 series 自 `v1.0.0-rc.46` 起**双向改动的文件 18 个**（`model/channel_constraint.go`、`dto/channel_constraints.go`、i18n 三个 yaml、`service/text_quota.go`/`task_polling.go`、面板 4 个文件、7 个前端 locale）。同一轮实测证明"overlap ≠ 冲突"：18 个里只有 `channel_constraint.go` 真冲突，其余全部 3-way 自动合并 —— 因此输出明确标注"风险区，不是冲突数" |
@@ -256,6 +258,7 @@ rm docker-compose.poc.override.yml
 | "AIClient2API 控制台可加 Kiro/Antigravity" | 根 HTML 里搜不到 provider（SPA），改以容器内 `src/ui-modules/provider-api.js`、`oauth-api.js` 含相关模块为证 |
 | 镜像内含许可证 | 在 0.2.0 容器内确认 `/licenses/{LICENSE,NOTICE,THIRD-PARTY-LICENSES.md}`，`/new-api --version` → `0.2.0` |
 | "私有补丁约 500 行"、"成品显示 0.1.0" | 数字过期 → 按 `git diff` 实测改写 |
+| "32 个实现文件 `+622/-38`，另有 4 个测试文件 `+307`"（`PRODUCT.md` 设计原则 2） | 再次过期，且当时的过滤口径不可复现 → 换成一条可重跑的命令与结果：实现改动 25 文件 `+587/-38`，含测试与前端 locale 共 36 文件 `+929/-39`；命令写进同一条主张里，下次过期能自己被发现 |
 
 未能用实测支撑、已改为明确标注外部依赖的说法：真实 Kiro/Antigravity 账号调用、真实国内厂商 Key 与出图（见 §10）。
 

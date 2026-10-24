@@ -113,7 +113,7 @@ docker compose -f docker-compose.poc.yml up -d
 ## 设计原则
 
 1. **核心不合并旁路代码**：账号池/OAuth 刷新放在 AIClient2API / CLIProxyAPI / Sub2API，通过 58/59/60 渠道接入。
-2. **私有补丁保持小**：两个日预算特性合计 32 个实现文件 `+622/-38`，另有 4 个测试文件 `+307`（`git diff v1.0.0-rc.46..HEAD` 实测）。改的是过滤器 + 结算/提交钩子，不重写选路核心。
+2. **私有补丁保持小**：两个日预算特性的实现改动 **25 个文件 `+587/-38`**；含测试与前端 locale 共 36 个文件 `+929/-39`（`git diff --shortstat v1.0.0-rc.46..HEAD -- common constant dto i18n model relaykit service web/src`，排除处再加 `':!*_test.go' ':!*__tests__*' ':!web/src/i18n'`）。改的是过滤器 + 结算/提交钩子，不重写选路核心。
 3. **跟上游优先**：每月一条 `./scripts/upstream-sync.sh drill <上游 ref>` 完成"overlap 预估 → 重放 `patches/series` → 构建 + 回归 + 类型门"，非 0 退出即说明这一版要人工处理，输出里直接给冲突文件与后续命令。
 4. **国内模型优先**：DeepSeek、Kimi、智谱、通义、MiniMax、火山、百度、腾讯等使用 new-api 原生渠道。
 5. **生图走官方扩展点**：优先用 new-api 内置 Task Plugin（阿里 Wan/Qwen-Image、豆包 Seedream），不修改核心。

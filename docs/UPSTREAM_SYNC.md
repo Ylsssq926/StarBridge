@@ -111,9 +111,15 @@ git diff --check
 
 已知冲突热点（按本轮重构后的实际结构）：
 
-> 实测锚点：把当前 20 个提交重放到比 rc.46 超前 23 个提交的 `upstream/main`，只有
+> 实测锚点（2026-10-24）：把当时 20 个提交重放到比 rc.46 超前 23 个提交的 `upstream/main`，只有
 > `model/channel_constraint.go` 冲突两处（`channelMatchesFilter` 的 switch、一个函数注释），
 > 其余 19 个提交自动合并。解决原则：上游新增的过滤器分支原样保留，日预算继续走独立求值。
+> 同一 `upstream/main`（`e835b1bfc`）上用 `drill` 复测 25 个提交的 series：阻塞点仍是 patch `0001`
+> 的同一个文件。把两处热点依次解决后跑完整重放（`am --continue`）：**25 个提交全部落地，人工介入只有 2 次**
+> —— `0001` 是 switch 里两个 `case` 取并集，`0011` 是一行函数注释取我方；升级树 `go build` + relaykit +
+> 三组回归全绿。所以 `drill` 报第一个冲突后，按本节改完再 `am --continue`，通常不需要额外介入。
+> 唯一的非功能性阻塞：main 的 `web/package.json` 把 typecheck 改成了 `bun check -b`，本地 bun 1.3.14 跑不了，
+> 这类情况用 `SKIP_TYPECHECK=1` 明确跳过，并在升级时同步换 bun 版本或改命令。
 > `apply` 现在接受任意 ref（`./scripts/upstream-sync.sh apply upstream/main` → 目录名里的斜杠会被换成连字符）。
 
 - `common/channel_daily_limit.go`：多指标计数（tokens / requests）与 Redis 不可用时的回退
