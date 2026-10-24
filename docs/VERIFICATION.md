@@ -110,6 +110,19 @@
 
 回归：`tsgo -b` 通过，渠道特性单测 358 项全通过（29 个文件）。其中新增一条面板回归：编辑渠道时两个日限额字段都要从 `setting` 回读、可编辑，且编辑后仍停在"其他设置"页签（正是上面第 1、2 条缺陷的守护测试）。
 
+**SQLite 与首启初始化实测**（`scripts/verify-sqlite-setup.mjs`，10/10）：用交付镜像 `new-api-daily-limit:0.2.0` 起一次性容器，不带 `SQL_DSN` 也不带 Redis，即"最小可部署形态"，逐项实测：
+
+| 检查 | 结果 |
+|---|---|
+| 空库首启 | `GET /api/setup` → `database_type=sqlite`、`root_init=false` |
+| 初始化向导 | `POST /api/setup` 返回"System initialized successfully" |
+| 向导账号权限 | 首个账号 `id=1 role=100`，可直接调用管理端接口（无需手工提权） |
+| 两个日限额保存 | `{"daily_token_limit":10}` / `{"daily_request_limit":1}` 原样落库 |
+| token 预算 | 数据库选路 + 进程内计数：200 → 429 `channel:daily_token_limit_exceeded` |
+| 请求数预算 | 生图（无 token 回报）：200 → 429 `channel:daily_request_limit_exceeded` |
+
+顺带查到一个运维要点：SQLite 以 WAL 模式运行，容器里主库文件只有 4KB、真实内容全在 `one-api.db-wal`（3MB）。只 `cp` 主库文件会得到一个"空库"，备份必须连 `-wal`/`-shm` 一起取，或先做 checkpoint。
+
 ## 5. 旁路容器
 
 | 旁路 | 实测 | 结论 |
@@ -163,7 +176,7 @@
 6. **旁路安全**：AIClient2API/Sub2API 的 OAuth 凭据价值高，UI 不应直接暴露公网；compose 已默认将 AIClient2API 端口绑定到 `127.0.0.1`，远程使用请走 SSH 隧道或带认证的反向代理。
 7. **真实上游**：Kiro/Antigravity 账号、国内厂商 Key 尚未接入，属于外部凭据依赖。
 8. **限额生效时机**：用量在“响应发出之后”的结算阶段写入，因此同一瞬间的并发请求可能略微超出上限（与自动禁用、额度扣减同样的最终一致语义）。验证脚本为此在两次请求间留 2s，实盘无需处理。
-9. **空数据库首启**：全新库里不会自动出现 `root/12345`，需要先走 `/setup` 初始化向导（或注册后用角色提升为管理员）。PoC 环境曾以 `register + role=100` 方式引导，正式部署请用向导。
+9. **空数据库首启**：全新库里不会自动出现 `root/12345`，需要先走 `/setup` 初始化向导（或注册后用角色提升为管理员）。SQLite 实例实测：`POST /api/setup` 成功后首个账号即 `role=100`，可直接调用管理端接口，无需手工提权；`GET /api/setup` 在初始化完成后会提前返回，`root_init`/`database_type` 不再回填。
 10. **令牌 Key 不可回显**：`/api/token/` 的创建与查询只返回掩码 Key，脚本或运维要拿到明文 Key 只能在创建当次由界面复制，不能事后再取。
 11. **数据库兼容**：新增代码不含裸 SQL、不加列、不改 `model/main.go` 迁移，SQLite/MySQL/PostgreSQL 三库行为一致（PoC 实测 Postgres；回退路径实测无 Redis）。
 

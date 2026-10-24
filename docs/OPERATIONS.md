@@ -6,7 +6,7 @@
 
 | 步骤 | 地址 | 说明 |
 |---|---|---|
-| 初始化 | `http://<host>:3800/setup` | 空库首启会出现初始化向导，创建管理员账号并选择数据库状态；接口 `GET/POST /api/setup` |
+| 初始化 | `http://<host>:3800/setup` | 空库首启会出现初始化向导，创建管理员账号并选择数据库状态；接口 `GET/POST /api/setup`。实测：向导建出的首个账号 `role=100` 直接是管理员，不需要手工提权 |
 | 登录 | `http://<host>:3800/sign-in` | 支持密码、OAuth、Passkey、两步验证（是否开启由系统设置决定） |
 | 注册 | `http://<host>:3800/sign-up` | 默认开放注册，可在「系统设置 → 运营/安全」关闭或改为邀请码制 |
 
@@ -119,6 +119,8 @@ curl http://<host>:3800/v1/chat/completions \
 
 ## 8. 验证与运维护栏
 
+备份提示：SQLite 走 WAL 模式，热备份必须把 `one-api.db`、`one-api.db-wal`、`one-api.db-shm` 一起取走，或先执行 `PRAGMA wal_checkpoint(TRUNCATE)`；只拷主库文件会得到一个几乎为空的库（实测见过 4KB 主库 + 3MB WAL）。
+
 ```bash
 ./scripts/product.sh ps          # 容器与端口状态
 ./scripts/product.sh logs        # 跟踪 new-api 日志
@@ -128,6 +130,11 @@ curl http://<host>:3800/v1/chat/completions \
 node scripts/verify-daily-limit.mjs     # 日限额 10 项边界（需要 scripts/mock-upstream.cjs）
 node scripts/verify-compat.mjs          # 协议/接线 7 项
 node scripts/verify-channel-types.mjs   # 17 种渠道类型的面板适配 + 限额生效
+
+# 最小部署形态实测（SQLite + /setup 首启，无 Postgres / 无 Redis）
+docker run -d --name nap-sqlite -p 127.0.0.1:3811:3000 new-api-daily-limit:0.2.0
+node scripts/verify-sqlite-setup.mjs
+docker rm -f nap-sqlite
 ```
 
 改完代码要发布：`./scripts/build-image.sh` 会重新生成 `bin/new-api-linux` 并打 `new-api-daily-limit:local` + `new-api-daily-limit:$(cat PRODUCT_VERSION)` 两个 tag。

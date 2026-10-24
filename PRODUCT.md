@@ -41,6 +41,7 @@
 | `scripts/verify-daily-limit.mjs` | 日限额 10 项边界检查（缓存路径 / DB 路径 / 无 Redis 均可跑） |
 | `scripts/verify-compat.mjs` | 协议与接线兼容检查（chat / messages / gemini / images / 错误语义） |
 | `scripts/verify-channel-types.mjs` | 逐上游类型的面板适配与限额生效检查 |
+| `scripts/verify-sqlite-setup.mjs` | SQLite + `/setup` 首启实测（最小部署形态：无 Postgres、无 Redis） |
 | `patches/series/` | **主机制**：由分支提交生成的 patch series（`git am -3` 重放） |
 | `patches/legacy/` | pre-commit 基线的手工 file patch，仅供 `USE_SERIES=0` 回退与历史对照 |
 
