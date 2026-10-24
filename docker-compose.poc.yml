@@ -1,0 +1,145 @@
+# New API + AIClient2API PoC
+#
+# Usage:
+#   docker compose -f docker-compose.poc.yml up -d
+#   New API UI:       http://localhost:3800
+#   AIClient2API UI:  http://localhost:3100
+#
+# Host port 3000 is often already in use. Override with NEW_API_PORT if needed.
+#
+# Channel wiring after both services are healthy:
+#   Kiro / Antigravity / Codex / Grok:
+#     type 59 (Sub2API / New-API compatible) or type 58 (Advanced Custom)
+#     base URL: http://aiclient2api:3000
+#     key:      the AIClient2API API key configured in its UI/config
+#   Images:
+#     type 1 OpenAI for any /v1/images/generations compatible provider, or
+#     type 61 Task Plugin for the built-in Alibaba (Wan/Qwen-Image) and
+#     Doubao (Seedream) image plugins.
+#
+# Optional Sub2API:
+#   Uncomment the sub2api block and read its deploy/.env.example first.
+#   It expects its own Postgres/Redis/JWT configuration.
+#   Its official compose references postgres:18-alpine; if that image is not
+#   available locally, postgres:15-alpine worked in our PoC.
+
+name: new-api-poc
+
+services:
+  new-api:
+    image: ${NEW_API_IMAGE:-calciumion/new-api:latest}
+    container_name: new-api-poc
+    restart: unless-stopped
+    command: --log-dir /app/logs
+    ports:
+      # 3800 avoids the common host conflict on 3000; override with NEW_API_PORT.
+      - "${NEW_API_BIND_HOST:-0.0.0.0}:${NEW_API_PORT:-3800}:3000"
+    volumes:
+      - ./data/new-api:/data
+      - ./logs/new-api:/app/logs
+    environment:
+      - TZ=Asia/Shanghai
+      - SQL_DSN=postgresql://newapi:${POSTGRES_PASSWORD:-newapi}@postgres:5432/new-api
+      - REDIS_CONN_STRING=redis://:${REDIS_PASSWORD:-newapi}@redis:6379
+      - MEMORY_CACHE_ENABLED=true
+      # Fast sync so channels added through the UI become selectable quickly.
+      - SYNC_FREQUENCY=5
+      - NODE_NAME=new-api-poc
+      - ERROR_LOG_ENABLED=true
+      - BATCH_UPDATE_ENABLED=false
+      # Change this before exposing the service.
+      - SESSION_SECRET=${SESSION_SECRET:-change-me-in-production}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - poc
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:3000/api/status | grep -o '\"success\":\\s*true' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  aiclient2api:
+    image: ${AICLIENT2API_IMAGE:-justlikemaki/aiclient-2-api:latest}
+    container_name: aiclient2api-poc
+    restart: unless-stopped
+    ports:
+      # Bind to localhost by default: this UI holds OAuth credentials.
+      # Set AICLIENT2API_BIND_HOST=0.0.0.0 only behind a protected proxy.
+      - "${AICLIENT2API_BIND_HOST:-127.0.0.1}:${AICLIENT2API_PORT:-3100}:3000"
+      - "${AICLIENT2API_BIND_HOST:-127.0.0.1}:8086:8086"       # Antigravity OAuth callback
+      - "${AICLIENT2API_BIND_HOST:-127.0.0.1}:1455:1455"       # Codex OAuth callback
+      - "${AICLIENT2API_BIND_HOST:-127.0.0.1}:56121:56121"     # Grok CLI OAuth callback
+      - "${AICLIENT2API_BIND_HOST:-127.0.0.1}:19876-19880:19876-19880" # Kiro OAuth callbacks
+    volumes:
+      - ./data/aiclient2api/configs:/app/configs
+      - ./data/aiclient2api/plugins:/app/src/plugins-user
+    environment:
+      - TZ=Asia/Shanghai
+      - ARGS=
+    networks:
+      - poc
+    healthcheck:
+      test: ["CMD", "node", "healthcheck.js"]
+      interval: 30s
+      timeout: 3s
+      start_period: 5s
+      retries: 3
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: new-api-poc-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: newapi
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-newapi}
+      POSTGRES_DB: new-api
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - poc
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U newapi -d new-api"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: new-api-poc-redis
+    restart: unless-stopped
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-newapi}"]
+    volumes:
+      - redis_data:/data
+    networks:
+      - poc
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-newapi}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Optional: enable after configuring Sub2API's own .env.
+  # sub2api:
+  #   image: ${SUB2API_IMAGE:-weishaw/sub2api:latest}
+  #   container_name: sub2api-poc
+  #   restart: unless-stopped
+  #   ports:
+  #     - "${SUB2API_PORT:-8080}:8080"
+  #   volumes:
+  #     - ./data/sub2api:/app/data
+  #   environment:
+  #     - TZ=Asia/Shanghai
+  #   networks:
+  #     - poc
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  poc:
+    driver: bridge

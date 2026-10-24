@@ -1,0 +1,215 @@
+diff --git a/web/src/features/channels/components/drawers/channel-mutate-drawer.tsx b/web/src/features/channels/components/drawers/channel-mutate-drawer.tsx
+index a1b527d..a0dd530 100644
+--- a/web/src/features/channels/components/drawers/channel-mutate-drawer.tsx
++++ b/web/src/features/channels/components/drawers/channel-mutate-drawer.tsx
+@@ -298,6 +298,7 @@ const SENSITIVE_FORM_FIELDS = [
+   'azure_responses_version',
+   'force_format',
+   'thinking_to_content',
++  'daily_token_limit',
+   'proxy',
+   'http_protocol',
+   'http2_connection_shards',
+@@ -1797,6 +1798,37 @@ export function ChannelMutateDrawer({
+     [onOpenChange, form, isSubmitting, showProviderPicker, providerTarget]
+   )
+ 
++  const dailyTokenLimitFields = (
++    <FormField
++      control={form.control}
++      name='daily_token_limit'
++      render={({ field }) => (
++        <FormItem>
++          <FormLabel>{t('Daily Token Limit')}</FormLabel>
++          <FormControl>
++            <Input
++              type='number'
++              min={0}
++              step={1}
++              placeholder={t('0 means unlimited')}
++              {...field}
++              value={field.value ?? 0}
++              onChange={(event) =>
++                field.onChange(Number(event.target.value) || 0)
++              }
++            />
++          </FormControl>
++          <FormDescription>
++            {t(
++              'Maximum billable input + output tokens per channel per day. 0 means unlimited.'
++            )}
++          </FormDescription>
++          <FormMessage />
++        </FormItem>
++      )}
++    />
++  )
++
+   const proxyFields = (
+     <FormField
+       control={form.control}
+@@ -4786,6 +4818,7 @@ export function ChannelMutateDrawer({
+                 className='space-y-4 disabled:opacity-60'
+               >
+                 {taskPollingFields}
++                {dailyTokenLimitFields}
+                 {proxyFields}
+                 {httpProtocolFields}
+                 {httpShardsFields}
+diff --git a/web/src/features/channels/lib/channel-form.ts b/web/src/features/channels/lib/channel-form.ts
+index 158f510..9cc185d 100644
+--- a/web/src/features/channels/lib/channel-form.ts
++++ b/web/src/features/channels/lib/channel-form.ts
+@@ -263,6 +263,7 @@ export const channelFormSchema = z
+     // Channel extra settings (stored in setting JSON, not sent directly)
+     force_format: z.boolean().optional(),
+     thinking_to_content: z.boolean().optional(),
++    daily_token_limit: z.number().int().min(0).optional(),
+     proxy: z
+       .string()
+       .optional()
+@@ -460,6 +461,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
+   // Channel extra settings
+   force_format: false,
+   thinking_to_content: false,
++  daily_token_limit: 0,
+   proxy: '',
+   http_protocol: HTTP_PROTOCOL_AUTO,
+   http2_connection_shards: 1,
+@@ -507,6 +509,7 @@ export function transformChannelToFormDefaults(
+     task_extend_plugin_keys: [] as string[],
+     force_format: false,
+     thinking_to_content: false,
++    daily_token_limit: 0,
+     proxy: '',
+     http_protocol: HTTP_PROTOCOL_AUTO as 'auto' | 'http1',
+     http2_connection_shards: 1,
+@@ -529,6 +532,7 @@ export function transformChannelToFormDefaults(
+         task_extend_plugin_keys: readTaskExtendPluginKeys(channel.type, parsed),
+         force_format: parsed.force_format || false,
+         thinking_to_content: parsed.thinking_to_content || false,
++        daily_token_limit: Number(parsed.daily_token_limit) || 0,
+         proxy: parsed.proxy || '',
+         http_protocol: protocol,
+         http2_connection_shards: protocol === HTTP_PROTOCOL_HTTP1 ? 1 : shards,
+@@ -669,6 +673,10 @@ export function buildSettingJSON(formData: ChannelFormValues): string {
+         : undefined,
+     force_format: formData.force_format || false,
+     thinking_to_content: formData.thinking_to_content || false,
++    daily_token_limit:
++      formData.daily_token_limit && formData.daily_token_limit > 0
++        ? formData.daily_token_limit
++        : undefined,
+     proxy: formData.proxy?.trim() || '',
+     pass_through_body_enabled: formData.pass_through_body_enabled === true,
+     responses_websocket_enabled:
+diff --git a/web/src/features/channels/types.ts b/web/src/features/channels/types.ts
+index 721e216..34e693f 100644
+--- a/web/src/features/channels/types.ts
++++ b/web/src/features/channels/types.ts
+@@ -84,6 +84,7 @@ export interface ChannelSettings {
+   task_extend_plugin_keys?: string[]
+   force_format?: boolean
+   thinking_to_content?: boolean
++  daily_token_limit?: number
+   proxy?: string
+   pass_through_body_enabled?: boolean
+   responses_websocket_enabled?: boolean
+diff --git a/web/src/i18n/locales/en.json b/web/src/i18n/locales/en.json
+index ad1ed53..798cda4 100644
+--- a/web/src/i18n/locales/en.json
++++ b/web/src/i18n/locales/en.json
+@@ -6318,6 +6318,9 @@
+     "These values come from the source index and are shown for review only. The gateway admits the plugin based on the metadata compiled from its source.": "These values come from the source index and are shown for review only. The gateway admits the plugin based on the metadata compiled from its source.",
+     "Thinking Suffix Adapter": "Thinking Suffix Adapter",
+     "Thinking to Content": "Thinking to Content",
++    "Daily Token Limit": "Daily Token Limit",
++    "0 means unlimited": "0 means unlimited",
++    "Maximum billable input + output tokens per channel per day. 0 means unlimited.": "Maximum billable input + output tokens per channel per day. 0 means unlimited.",
+     "Thinking...": "Thinking...",
+     "Third-party": "Third-party",
+     "Third-party — use at your own risk": "Third-party — use at your own risk",
+diff --git a/web/src/i18n/locales/fr.json b/web/src/i18n/locales/fr.json
+index 347d231..e361663 100644
+--- a/web/src/i18n/locales/fr.json
++++ b/web/src/i18n/locales/fr.json
+@@ -6318,6 +6318,9 @@
+     "These values come from the source index and are shown for review only. The gateway admits the plugin based on the metadata compiled from its source.": "Ces valeurs proviennent de l’index de la source et sont affichées à titre d’examen uniquement. La passerelle admet le plugin d’après les métadonnées compilées depuis son code.",
+     "Thinking Suffix Adapter": "Adaptateur de suffixe thinking",
+     "Thinking to Content": "Réflexion vers Contenu",
++    "Daily Token Limit": "Limite quotidienne de tokens",
++    "0 means unlimited": "0 signifie illimité",
++    "Maximum billable input + output tokens per channel per day. 0 means unlimited.": "Nombre maximal de tokens facturables (entrée + sortie) par canal et par jour. 0 signifie illimité.",
+     "Thinking...": "Réflexion...",
+     "Third-party": "Tiers",
+     "Third-party — use at your own risk": "Tiers — à vos risques et périls",
+diff --git a/web/src/i18n/locales/ja.json b/web/src/i18n/locales/ja.json
+index 944adc2..d2f3c78 100644
+--- a/web/src/i18n/locales/ja.json
++++ b/web/src/i18n/locales/ja.json
+@@ -6318,6 +6318,9 @@
+     "These values come from the source index and are shown for review only. The gateway admits the plugin based on the metadata compiled from its source.": "これらの値はソースのインデックス由来で、確認のために表示しているだけです。ゲートウェイはソースからコンパイルされた実際のメタデータに基づいてプラグインを受け入れます。",
+     "Thinking Suffix Adapter": "思考サフィックスアダプター",
+     "Thinking to Content": "思考からコンテンツへ",
++    "Daily Token Limit": "1日あたりのトークン上限",
++    "0 means unlimited": "0 は無制限を意味します",
++    "Maximum billable input + output tokens per channel per day. 0 means unlimited.": "チャネルごとの1日あたりの課金対象入力＋出力トークン上限。0 は無制限を意味します。",
+     "Thinking...": "思考中...",
+     "Third-party": "サードパーティ",
+     "Third-party — use at your own risk": "サードパーティ — 自己責任",
+diff --git a/web/src/i18n/locales/ru.json b/web/src/i18n/locales/ru.json
+index c2d954e..f814297 100644
+--- a/web/src/i18n/locales/ru.json
++++ b/web/src/i18n/locales/ru.json
+@@ -6318,6 +6318,9 @@
+     "These values come from the source index and are shown for review only. The gateway admits the plugin based on the metadata compiled from its source.": "Эти значения взяты из индекса источника и показаны только для проверки. Шлюз допускает плагин по метаданным, скомпилированным из его кода.",
+     "Thinking Suffix Adapter": "Адаптер суффикса thinking",
+     "Thinking to Content": "Мышление в контент",
++    "Daily Token Limit": "Суточный лимит токенов",
++    "0 means unlimited": "0 означает без ограничений",
++    "Maximum billable input + output tokens per channel per day. 0 means unlimited.": "Максимум оплачиваемых входных и выходных токенов на канал в день. 0 означает без ограничений.",
+     "Thinking...": "Размышление...",
+     "Third-party": "Сторонний",
+     "Third-party — use at your own risk": "Сторонний — на ваш риск",
+diff --git a/web/src/i18n/locales/vi.json b/web/src/i18n/locales/vi.json
+index 9f9f8cf..b4fee7c 100644
+--- a/web/src/i18n/locales/vi.json
++++ b/web/src/i18n/locales/vi.json
+@@ -6318,6 +6318,9 @@
+     "These values come from the source index and are shown for review only. The gateway admits the plugin based on the metadata compiled from its source.": "Các giá trị này lấy từ chỉ mục của nguồn và chỉ để bạn xem xét. Cổng quyết định chấp nhận plugin dựa trên metadata biên dịch từ mã nguồn của nó.",
+     "Thinking Suffix Adapter": "Adapter hậu tố thinking",
+     "Thinking to Content": "Suy nghĩ thành Nội dung",
++    "Daily Token Limit": "Giới hạn token hàng ngày",
++    "0 means unlimited": "0 nghĩa là không giới hạn",
++    "Maximum billable input + output tokens per channel per day. 0 means unlimited.": "Số token đầu vào + đầu ra có thể tính phí tối đa mỗi kênh mỗi ngày. 0 nghĩa là không giới hạn.",
+     "Thinking...": "Đang suy nghĩ...",
+     "Third-party": "Bên thứ ba",
+     "Third-party — use at your own risk": "Bên thứ ba — tự chịu rủi ro",
+diff --git a/web/src/i18n/locales/zh-TW.json b/web/src/i18n/locales/zh-TW.json
+index 9ab638b..d6df0f8 100644
+--- a/web/src/i18n/locales/zh-TW.json
++++ b/web/src/i18n/locales/zh-TW.json
+@@ -6318,6 +6318,9 @@
+     "These values come from the source index and are shown for review only. The gateway admits the plugin based on the metadata compiled from its source.": "這些值來自來源索引，僅供審查參考。閘道的准入判定只依據從原始碼編譯出的真實中介資料。",
+     "Thinking Suffix Adapter": "思考後綴配接器",
+     "Thinking to Content": "思維到內容",
++    "Daily Token Limit": "每日 Token 限額",
++    "0 means unlimited": "0 表示不限制",
++    "Maximum billable input + output tokens per channel per day. 0 means unlimited.": "每個管道每天可計費的輸入 + 輸出 Token 上限。0 表示不限制。",
+     "Thinking...": "思考中...",
+     "Third-party": "第三方",
+     "Third-party — use at your own risk": "第三方 — 風險自負",
+diff --git a/web/src/i18n/locales/zh.json b/web/src/i18n/locales/zh.json
+index ffc3432..3f3ea88 100644
+--- a/web/src/i18n/locales/zh.json
++++ b/web/src/i18n/locales/zh.json
+@@ -6318,6 +6318,9 @@
+     "These values come from the source index and are shown for review only. The gateway admits the plugin based on the metadata compiled from its source.": "这些值来自源索引，仅供审查参考。网关的准入判定只依据从源码编译出的真实元数据。",
+     "Thinking Suffix Adapter": "思考后缀适配器",
+     "Thinking to Content": "思维到内容",
++    "Daily Token Limit": "每日 Token 限额",
++    "0 means unlimited": "0 表示不限制",
++    "Maximum billable input + output tokens per channel per day. 0 means unlimited.": "每个渠道每天可计费的输入 + 输出 Token 上限。0 表示不限制。",
+     "Thinking...": "思考中...",
+     "Third-party": "第三方",
+     "Third-party — use at your own risk": "第三方 — 风险自担",

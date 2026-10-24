@@ -1,0 +1,203 @@
+# 验证记录
+
+记录时间：2026-10-24
+基线：new-api `v1.0.0-rc.46` / `main 33c61a24`
+
+## 1. 上游差距
+
+| 项 | 值 |
+|---|---|
+| 本地旧基线 | `20d3e737`（2026-05-20） |
+| 旧 fork HEAD | `ac98d145`（2026-05-23） |
+| 上游 main | `33c61a24`（2026-10-23） |
+| 落后提交 | 841 |
+
+结论：旧 fork 不再作为主项目，改从 rc.46/main 重建。
+
+## 2. 构建与测试
+
+| 验证 | 命令 | 结果 |
+|---|---|---|
+| 主模块构建 | `go build ./...` | 通过 |
+| relaykit 独立构建 | `cd relaykit && GOWORK=off go build ./...` | 通过 |
+| 日限额单测 | `go test ./common -run Daily` | 通过 |
+| 选路/任务单测 | `go test ./model -run 'Daily|FilterCandidate|TaskPlugin'` | 通过 |
+| 任务计费回归 | `go test ./service -run 'TestSettle_|TestTaskBilling|TestLogTaskConsumption|TestRecalculate'` | 通过 |
+| 前端类型检查 | `cd web && bun run typecheck` | 通过 |
+| 前端 lint | `bunx oxlint ...` | 0 warning / 0 error |
+| 渠道组件测试 | `bunx vitest run ...` | 95 passed |
+| 完整同步校验 | `./scripts/upstream-sync.sh check-full` | 前端构建 + typecheck + 后端回归通过 |
+| 全量后端测试 | `go test ./common ./model ./service ./dto` | 仅 2 个既存失败（见下），其余通过 |
+| relaykit 模块测试 | `cd relaykit && GOWORK=off go test ./...` | 9 个包全部通过 |
+| 新鲜 worktree 全量校验 | `PATCH_FILES=patches/channel-daily-limit.patch ./scripts/upstream-sync.sh apply v1.0.0-rc.46` + `check-full <worktree>` | 补丁自动落地 → `bun install --frozen-lockfile` + `rsbuild build` + `tsgo -b` + `go build` + 定向回归全部通过 |
+| 成品镜像与源码一致 | `./scripts/build-image.sh` 后重建容器 | 镜像层内容哈希不变（同一份源码 → 同一份二进制） |
+
+已知既存失败（纯净 rc.46 同样失败，与补丁无关）：
+
+- `TestObserveChannelAffinityUsageCacheByRelayFormat_MixedMode`
+- `TestObserveChannelAffinityUsageCacheByRelayFormat_UnsupportedModeKeepsEmpty`
+
+## 3. 补丁重放
+
+| 验证 | 结果 |
+|---|---|
+| 应用到纯净 rc.46 | `git apply --check` 通过，构建 + 单测通过 |
+| 直接应用到最新 main | 3 个文件冲突（上游新增 `FilterTaskPluginEndpoint`） |
+| 三方合并后应用到 main | 冲突解决，`go build ./...` 通过 |
+| 纯净 main 按序应用 `0001` + `0002` | 应用成功、构建成功、单测通过 |
+| 纯净 tag 应用 rc.46 补丁（真实 tag，非本地分支） | `git worktree add` + `git apply --3way` 全部 clean，构建与单测通过 |
+
+## 4. 日限额与兼容性端到端
+
+脚本化验证（`scripts/mock-upstream.cjs` 提供固定 usage=5+5 的假上游，`scripts/verify-daily-limit.mjs` 与 `scripts/verify-compat.mjs` 跑完自动清理渠道）：
+
+| 场景 | 期望 | 结果 |
+|---|---|---|
+| 限额=10，第一次请求（usage 10） | 200 | 通过 |
+| 限额=10，usage 已达上限后 | 429 `channel:daily_token_limit_exceeded` | 通过 |
+| 限额改回 0（不限制） | 连续两次 200 | 通过 |
+| 已有超额用量后把限额调低 | 立即 429 | 通过 |
+| 把限额调高 | 同步周期内恢复 200 | 通过 |
+| 内存缓存选路（`MEMORY_CACHE_ENABLED=true`） | 10/10 | 通过 |
+| 数据库选路（`MEMORY_CACHE_ENABLED=false`） | 10/10 | 通过 |
+| 未启用 Redis（进程内回退计数） | 10/10 | 通过 |
+
+协议/接线兼容（`verify-compat.mjs`，7/7）：
+
+| 检查 | 结果 |
+|---|---|
+| `/v1/chat/completions` 透传 | 200 |
+| `/v1/messages`（Claude 格式走 OpenAI 渠道） | 200 |
+| `/v1beta/models/...:generateContent`（Gemini 格式） | 200 |
+| `/v1/images/generations` | 200，返回 `data[0].url` |
+| 不存在的模型 | 503 `No available channel`（与日限额 429 明确区分） |
+| 无效令牌 | 401 |
+| 网关 → AIClient2API（docker 网络内） | 可达，返回旁路自身的鉴权/模型响应 |
+
+`scripts/verify-compat.mjs` 覆盖的是"同一条 OpenAI 渠道能不能收这三种格式"。另外还按上游类型逐条验证了控制台的适配（`scripts/verify-channel-types.mjs`）：每种类型都建两条渠道（一条不带 `daily_token_limit`、一条带），比较两者校验结果是否一致，再回读 `setting` 并做一次无关字段更新确认限额不被覆盖。
+
+| 类型 | 面板建渠道 | 限额保存/更新后仍在 | 请求可达 | 到顶返回 429 |
+|---|---|---|---|---|
+| 1 OpenAI | ok | ok | 200 | 是 |
+| 14 Anthropic | ok | ok | 200 | 是 |
+| 16 Zhipu | ok | ok | 假上游未实现该路径 | 未断言 |
+| 17 Ali | ok | ok | 200 | 是 |
+| 24 Gemini | ok | ok | 200 | 是 |
+| 25 Moonshot | ok | ok | 200 | 是 |
+| 41 VertexAI | 需 `deployment_region`（带/不带限额结果一致） | - | - | - |
+| 43 DeepSeek | ok | ok | 200 | 是 |
+| 45 VolcEngine | ok | ok | 200 | 是 |
+| 54 Doubao | ok | ok | 200 | 是 |
+| 57 Codex | 需 OAuth JSON key（带/不带限额结果一致） | - | - | - |
+| 58 Advanced Custom | ok（附 `advanced_custom` 路由） | ok | 200 | 是 |
+| 59 Sub2API | ok | ok | 200 | 是 |
+| 60 New API | ok | ok | 200 | 是 |
+| 61 Task Plugin | ok，`task_plugin_key=alibaba` 与 `daily_token_limit` 共存且不互相覆盖 | ok | 类型 61 不走 chat | 未断言 |
+| 62 vLLM | ok | ok | 200 | 是 |
+| 63 SGLang | ok | ok | 200 | 是 |
+
+结论：17/17 类型的校验结果不因补丁改变，15/15 可路由类型到顶即 429（含旁路常用的 58/59/60）。
+
+顺带修掉两个控制台适配缺陷（`patches/0003-console-block-adaptation.patch`）：
+
+1. `daily_token_limit` 没登记在 `CONFIGURATION_BLOCKS.extraSettings.fields` 里 → 编辑该字段时表单会把配置区跳回 "connection"，校验错误也被归到错误的区块。
+2. `configured.extraSettings` 没把限额算作"已配置" → 只设了日限额的渠道，"其他设置"区块不显示已配置标记。
+
+回归：`tsgo -b` 通过，渠道特性单测 357 项全通过（29 个文件）。
+
+## 5. 旁路容器
+
+| 旁路 | 实测 | 结论 |
+|---|---|---|
+| AIClient2API | `/health` healthy；类型 59 转发后返回 `No healthy provider found` | 转发成立，缺账号 |
+| CLIProxyAPI | v8.0.41，8317；类型 58 转发后返回 `unknown provider for model gpt-test` | 转发成立，缺账号 |
+| Sub2API | `/health` `{"status":"ok"}`；类型 59 转发后返回 `Invalid API key` | 转发成立，缺有效 Key/账号 |
+
+## 6. 生图
+
+| 验证 | 结果 |
+|---|---|
+| 类型 1 + mock `/v1/images/generations` | 200，返回图片 URL |
+| 类型 17 + 内置 Alibaba 插件 + mock 厂商 | 200，`data[0].url` 正常 |
+| 插件实际请求 | `POST /api/v1/services/aigc/multimodal-generation/generation` |
+| 响应解析 | `output.choices[].message.content[].image` 正常 |
+
+## 7. compose
+
+| 验证 | 结果 |
+|---|---|
+| `docker compose config --quiet` | 通过 |
+| 四服务启动 | new-api / AIClient2API / Postgres / Redis 全部 healthy |
+| 容器网络 | new-api 容器内访问 `http://aiclient2api:3000/health` 成功 |
+| 类型 59 转发 | 收到 AIClient2API 的 provider 错误，转发成立 |
+| 修复 | 宿主 3000 冲突改为默认 3800；PoC 用 5 秒同步 |
+
+## 8. 成品镜像与完整 compose
+
+| 验证 | 结果 |
+|---|---|
+| `scripts/build-image.sh` | exit 0 |
+| 镜像 | `new-api-daily-limit:local` 与 `new-api-daily-limit:0.1.0`，约 312MB |
+| 版本 | `docker run --rm new-api-daily-limit:0.1.0 --version` → `0.1.0` |
+| 许可证 | 镜像内包含 LICENSE、NOTICE、THIRD-PARTY-LICENSES.md |
+| 直接运行（默认 SQLite） | `/api/status` 200 |
+| 完整 compose（成品镜像 + Postgres + Redis + AIClient2API） | 四服务 healthy |
+| 端口安全 | new-api `0.0.0.0:3800`；AIClient2API 及其 OAuth 回调仅 `127.0.0.1` |
+| new-api 日志 | `using PostgreSQL as database`、`New API 0.1.0 started`、`memory cache enabled` |
+| 前端 | 通过 `/api/status` 与页面访问验证 |
+
+注意：直接 `docker run` 使用 SQLite 时不要设置裸的 `SQLITE_PATH=/data/new-api.db`（在当前环境会报 unable to open database file）；省略该变量使用默认 `one-api.db` 即可。compose 默认走 Postgres，不受影响。
+
+## 9. 已知边界
+
+1. **日限额计数语义**：只统计可计费的输入 + 输出 token；缓存命中、缓存创建不计入。上限是渠道级，不是模型级。
+2. **任务计费覆盖**：只覆盖“返回 totalTokens 并按 token 重算”的任务；按次计费、纯 tiered usage 且不返回 token 的任务不会累加日限额。
+3. **多实例一致性**：日限额依赖 Redis；未启用 Redis 时退化为进程内计数，多实例会不一致。
+4. **性能**：候选渠道过滤会解析一次 `setting` JSON；渠道数量很大时应增加 `channelID -> daily limit` 缓存。
+5. **PoC 安全边界**：compose 是验证环境，镜像默认 root、未启用 TLS、`SESSION_COOKIE_SECURE` 未开；生产需加反向代理、TLS、非 root、密钥管理和备份。
+6. **旁路安全**：AIClient2API/Sub2API 的 OAuth 凭据价值高，UI 不应直接暴露公网；compose 已默认将 AIClient2API 端口绑定到 `127.0.0.1`，远程使用请走 SSH 隧道或带认证的反向代理。
+7. **真实上游**：Kiro/Antigravity 账号、国内厂商 Key 尚未接入，属于外部凭据依赖。
+8. **限额生效时机**：用量在“响应发出之后”的结算阶段写入，因此同一瞬间的并发请求可能略微超出上限（与自动禁用、额度扣减同样的最终一致语义）。验证脚本为此在两次请求间留 2s，实盘无需处理。
+9. **空数据库首启**：全新库里不会自动出现 `root/12345`，需要先走 `/setup` 初始化向导（或注册后用角色提升为管理员）。PoC 环境曾以 `register + role=100` 方式引导，正式部署请用向导。
+10. **令牌 Key 不可回显**：`/api/token/` 的创建与查询只返回掩码 Key，脚本或运维要拿到明文 Key 只能在创建当次由界面复制，不能事后再取。
+11. **数据库兼容**：新增代码不含裸 SQL、不加列、不改 `model/main.go` 迁移，SQLite/MySQL/PostgreSQL 三库行为一致（PoC 实测 Postgres；回退路径实测无 Redis）。
+
+## 10. 未验证（需要外部凭据）
+
+- Kiro / Antigravity 真实账号登录与真实模型调用
+- DeepSeek / GLM / Kimi / 豆包 / 阿里真实 Key
+- 阿里 Wan/Qwen-Image、豆包 Seedream 真实出图
+- Sub2API 有效 API Key + 真实账号池
+
+这些不影响协议/架构结论，但属于上线前必须完成的真实链路验证。
+
+## 11. 复现
+
+```bash
+# 1. 构建
+go build ./...
+(cd relaykit && GOWORK=off go build ./...)
+(cd web && bun run typecheck)
+
+# 2. 日限额单测
+go test ./common -run Daily -count=1
+go test ./model -run 'Daily|FilterCandidate|TaskPlugin' -count=1
+
+# 3. compose 校验
+docker compose -f docker-compose.poc.yml config --quiet
+
+# 4. 补丁重放
+./scripts/upstream-sync.sh apply v1.0.0-rc.47
+./scripts/upstream-sync.sh check ../new-api-v1.0.0-rc.47
+
+# 5. 端到端边界与兼容（需要 compose 栈 + 假上游）
+./scripts/product.sh up
+node scripts/mock-upstream.cjs &            # 监听 3999，usage 固定 5+5
+node scripts/verify-daily-limit.mjs          # 10 项日限额边界
+node scripts/verify-compat.mjs               # 7 项协议/接线兼容
+# 切换选路或关闭 Redis 复跑：
+printf 'services:\n  new-api:\n    environment:\n      - MEMORY_CACHE_ENABLED=false\n' > docker-compose.poc.override.yml
+docker compose -f docker-compose.poc.yml up -d --force-recreate new-api
+node scripts/verify-daily-limit.mjs
+rm docker-compose.poc.override.yml
+```

@@ -1,0 +1,1031 @@
+diff --git a/common/channel_daily_limit.go b/common/channel_daily_limit.go
+new file mode 100644
+index 0000000..2a76d90
+--- /dev/null
++++ b/common/channel_daily_limit.go
+@@ -0,0 +1,135 @@
++package common
++
++import (
++	"errors"
++	"fmt"
++	"strconv"
++	"sync"
++	"time"
++
++	"github.com/QuantumNous/new-api/constant"
++	"github.com/go-redis/redis/v8"
++)
++
++var (
++	channelDailyTokenFallbackMu          sync.Mutex
++	channelDailyTokenFallbackUsage       = map[string]int64{}
++	channelDailyTokenFallbackCleanupOnce sync.Once
++	channelDailyTokenFallbackLogOnce     sync.Once
++)
++
++func channelDailyTokenDate(t time.Time) string {
++	return t.Format("20060102")
++}
++
++func channelDailyTokenNextMidnight(t time.Time) time.Time {
++	return time.Date(t.Year(), t.Month(), t.Day()+1, 0, 0, 0, 0, t.Location())
++}
++
++func channelDailyTokenRedisKey(channelID int, t time.Time) string {
++	return fmt.Sprintf(constant.ChannelDailyTokenUsageKeyFmt, channelID, channelDailyTokenDate(t))
++}
++
++func channelDailyTokenFallbackKey(channelID int, t time.Time) string {
++	return fmt.Sprintf("%d:%s", channelID, channelDailyTokenDate(t))
++}
++
++func logChannelDailyTokenFallbackRedisDisabled() {
++	channelDailyTokenFallbackLogOnce.Do(func() {
++		SysLog(LogText("Redis is disabled; channel daily token usage falls back to in-process memory and is not consistent across multiple instances"))
++	})
++}
++
++func startChannelDailyTokenFallbackCleanup() {
++	channelDailyTokenFallbackCleanupOnce.Do(func() {
++		go func() {
++			ticker := time.NewTicker(time.Minute)
++			defer ticker.Stop()
++			for range ticker.C {
++				currentDate := channelDailyTokenDate(time.Now())
++				channelDailyTokenFallbackMu.Lock()
++				for key := range channelDailyTokenFallbackUsage {
++					if len(key) < len(currentDate) || key[len(key)-len(currentDate):] != currentDate {
++						delete(channelDailyTokenFallbackUsage, key)
++					}
++				}
++				channelDailyTokenFallbackMu.Unlock()
++			}
++		}()
++	})
++}
++
++func getChannelDailyTokenFallbackUsage(channelID int, now time.Time) int64 {
++	key := channelDailyTokenFallbackKey(channelID, now)
++	channelDailyTokenFallbackMu.Lock()
++	defer channelDailyTokenFallbackMu.Unlock()
++	return channelDailyTokenFallbackUsage[key]
++}
++
++func addChannelDailyTokenFallbackUsage(channelID int, tokens int64, now time.Time) {
++	key := channelDailyTokenFallbackKey(channelID, now)
++	channelDailyTokenFallbackMu.Lock()
++	channelDailyTokenFallbackUsage[key] += tokens
++	channelDailyTokenFallbackMu.Unlock()
++}
++
++// GetChannelDailyTokenUsage returns today's billable token usage for a channel.
++func GetChannelDailyTokenUsage(channelID int) int64 {
++	now := time.Now()
++	fallbackUsage := getChannelDailyTokenFallbackUsage(channelID, now)
++	if RedisEnabled && RDB != nil {
++		value, err := RedisGet(channelDailyTokenRedisKey(channelID, now))
++		if errors.Is(err, redis.Nil) {
++			return fallbackUsage
++		}
++		if err != nil {
++			SysError(fmt.Sprintf("failed to get channel daily token usage from Redis: channel_id=%d, error=%v", channelID, err))
++			return fallbackUsage
++		}
++		usage, err := strconv.ParseInt(value, 10, 64)
++		if err != nil {
++			SysError(fmt.Sprintf("failed to parse channel daily token usage: channel_id=%d, value=%s, error=%v", channelID, value, err))
++			return fallbackUsage
++		}
++		return usage + fallbackUsage
++	}
++
++	logChannelDailyTokenFallbackRedisDisabled()
++	startChannelDailyTokenFallbackCleanup()
++	return fallbackUsage
++}
++
++// IsChannelDailyTokenUsageAvailable reports whether the channel may serve
++// another request today. A non-positive limit means unlimited.
++func IsChannelDailyTokenUsageAvailable(channelID int, limit int64) bool {
++	if limit <= 0 {
++		return true
++	}
++	return GetChannelDailyTokenUsage(channelID) < limit
++}
++
++// IncreaseChannelDailyTokenUsage records billable usage for the current day.
++func IncreaseChannelDailyTokenUsage(channelID int, tokens int64) error {
++	if channelID <= 0 || tokens <= 0 {
++		return nil
++	}
++
++	now := time.Now()
++	if RedisEnabled && RDB != nil {
++		expireAt := channelDailyTokenNextMidnight(now)
++		_, err := RedisIncrByWithExpireAt(channelDailyTokenRedisKey(channelID, now), tokens, expireAt)
++		if err != nil {
++			startChannelDailyTokenFallbackCleanup()
++			addChannelDailyTokenFallbackUsage(channelID, tokens, now)
++			fallbackErr := fmt.Errorf("channel daily token usage NOT recorded in Redis, daily limit may not take effect across instances: channel_id=%d, tokens=%d, error=%w", channelID, tokens, err)
++			SysError(fallbackErr.Error())
++			return fallbackErr
++		}
++		return nil
++	}
++
++	logChannelDailyTokenFallbackRedisDisabled()
++	startChannelDailyTokenFallbackCleanup()
++	addChannelDailyTokenFallbackUsage(channelID, tokens, now)
++	return nil
++}
+diff --git a/common/channel_daily_limit_test.go b/common/channel_daily_limit_test.go
+new file mode 100644
+index 0000000..278c4b9
+--- /dev/null
++++ b/common/channel_daily_limit_test.go
+@@ -0,0 +1,47 @@
++package common
++
++import (
++	"testing"
++	"time"
++)
++
++func clearChannelDailyTokenFallbackForTest(channelID int) {
++	key := channelDailyTokenFallbackKey(channelID, time.Now())
++	channelDailyTokenFallbackMu.Lock()
++	delete(channelDailyTokenFallbackUsage, key)
++	channelDailyTokenFallbackMu.Unlock()
++}
++
++func TestChannelDailyTokenUsageFallback(t *testing.T) {
++	oldEnabled, oldRDB := RedisEnabled, RDB
++	RedisEnabled, RDB = false, nil
++	t.Cleanup(func() {
++		RedisEnabled, RDB = oldEnabled, oldRDB
++	})
++
++	channelID := 990001
++	clearChannelDailyTokenFallbackForTest(channelID)
++	t.Cleanup(func() { clearChannelDailyTokenFallbackForTest(channelID) })
++
++	if !IsChannelDailyTokenUsageAvailable(channelID, 0) {
++		t.Fatal("a zero limit must mean unlimited")
++	}
++	if err := IncreaseChannelDailyTokenUsage(channelID, 7); err != nil {
++		t.Fatalf("increase usage: %v", err)
++	}
++	if got := GetChannelDailyTokenUsage(channelID); got != 7 {
++		t.Fatalf("usage = %d, want 7", got)
++	}
++	if IsChannelDailyTokenUsageAvailable(channelID, 7) {
++		t.Fatal("usage at the limit must be unavailable")
++	}
++	if !IsChannelDailyTokenUsageAvailable(channelID, 8) {
++		t.Fatal("usage below the limit must be available")
++	}
++	if err := IncreaseChannelDailyTokenUsage(channelID, 5); err != nil {
++		t.Fatalf("increase usage again: %v", err)
++	}
++	if got := GetChannelDailyTokenUsage(channelID); got != 12 {
++		t.Fatalf("usage = %d, want 12", got)
++	}
++}
+diff --git a/common/redis.go b/common/redis.go
+index fec5573..489793a 100644
+--- a/common/redis.go
++++ b/common/redis.go
+@@ -272,6 +272,21 @@ func RedisIncr(key string, delta int64) error {
+ 	return nil
+ }
+ 
++// RedisIncrByWithExpireAt atomically increments key and sets its absolute
++// expiration, so a daily counter cannot outlive its day bucket.
++func RedisIncrByWithExpireAt(key string, delta int64, expireAt time.Time) (int64, error) {
++	if DebugEnabled {
++		SysLog(LogText("Redis INCRBY EXPIREAT: key=%s, delta=%d, expireAt=%s", key, delta, expireAt.Format(time.RFC3339)))
++	}
++	ctx := context.Background()
++	script := redis.NewScript(`
++local current = redis.call("INCRBY", KEYS[1], ARGV[1])
++redis.call("EXPIREAT", KEYS[1], ARGV[2])
++return current
++`)
++	return script.Run(ctx, RDB, []string{key}, delta, expireAt.Unix()).Int64()
++}
++
+ func RedisHIncrBy(key, field string, delta int64) error {
+ 	if DebugEnabled {
+ 		SysLog(LogText("Redis HINCRBY: key=%s, field=%s, delta=%d", key, field, delta))
+diff --git a/constant/cache_key.go b/constant/cache_key.go
+index 0601396..741a30d 100644
+--- a/constant/cache_key.go
++++ b/constant/cache_key.go
+@@ -2,10 +2,11 @@ package constant
+ 
+ // Cache keys
+ const (
+-	UserGroupKeyFmt    = "user_group:%d"
+-	UserQuotaKeyFmt    = "user_quota:%d"
+-	UserEnabledKeyFmt  = "user_enabled:%d"
+-	UserUsernameKeyFmt = "user_name:%d"
++	UserGroupKeyFmt              = "user_group:%d"
++	UserQuotaKeyFmt              = "user_quota:%d"
++	UserEnabledKeyFmt            = "user_enabled:%d"
++	UserUsernameKeyFmt           = "user_name:%d"
++	ChannelDailyTokenUsageKeyFmt = "channel_daily_tokens:%d:%s"
+ )
+ 
+ const (
+diff --git a/dto/channel_constraints.go b/dto/channel_constraints.go
+index 1936378..67b465e 100644
+--- a/dto/channel_constraints.go
++++ b/dto/channel_constraints.go
+@@ -40,6 +40,7 @@ const (
+ 	FilterTaskPluginEndpoint ChannelFilterKind = "task_plugin_endpoint"
+ 	FilterTaskPluginIdentity ChannelFilterKind = "task_plugin_identity"
+ 	FilterResponsesWebSocket ChannelFilterKind = "responses_websocket"
++	FilterDailyTokenLimit    ChannelFilterKind = "daily_token_limit"
+ )
+ 
+ type ChannelFilter struct {
+diff --git a/i18n/keys.go b/i18n/keys.go
+index 2da7668..eb11feb 100644
+--- a/i18n/keys.go
++++ b/i18n/keys.go
+@@ -22,18 +22,19 @@ const (
+ 	MsgRateLimitReached      = "rate_limit.reached"
+ 	MsgRateLimitTotalReached = "rate_limit.total_reached"
+ 
+-	MsgDistributorInvalidRequest               = "distributor.invalid_request"
+-	MsgDistributorInvalidChannelId             = "distributor.invalid_channel_id"
+-	MsgDistributorChannelDisabled              = "distributor.channel_disabled"
+-	MsgDistributorTokenNoModelAccess           = "distributor.token_no_model_access"
+-	MsgDistributorTokenModelForbidden          = "distributor.token_model_forbidden"
+-	MsgDistributorModelNameRequired            = "distributor.model_name_required"
+-	MsgDistributorInvalidPlayground            = "distributor.invalid_playground_request"
+-	MsgDistributorGroupAccessDenied            = "distributor.group_access_denied"
+-	MsgDistributorGetChannelFailed             = "distributor.get_channel_failed"
+-	MsgDistributorNoAvailableChannel           = "distributor.no_available_channel"
+-	MsgDistributorNoAvailableChannelTaskPlugin = "distributor.no_available_channel_task_plugin"
+-	MsgDistributorInvalidParseModel            = "distributor.invalid_request_parse_model"
++	MsgDistributorInvalidRequest                 = "distributor.invalid_request"
++	MsgDistributorInvalidChannelId               = "distributor.invalid_channel_id"
++	MsgDistributorChannelDisabled                = "distributor.channel_disabled"
++	MsgDistributorTokenNoModelAccess             = "distributor.token_no_model_access"
++	MsgDistributorTokenModelForbidden            = "distributor.token_model_forbidden"
++	MsgDistributorModelNameRequired              = "distributor.model_name_required"
++	MsgDistributorInvalidPlayground              = "distributor.invalid_playground_request"
++	MsgDistributorGroupAccessDenied              = "distributor.group_access_denied"
++	MsgDistributorGetChannelFailed               = "distributor.get_channel_failed"
++	MsgDistributorNoAvailableChannel             = "distributor.no_available_channel"
++	MsgDistributorNoAvailableChannelTaskPlugin   = "distributor.no_available_channel_task_plugin"
++	MsgDistributorChannelDailyTokenLimitExceeded = "distributor.channel_daily_token_limit_exceeded"
++	MsgDistributorInvalidParseModel              = "distributor.invalid_request_parse_model"
+ 
+ 	MsgQuotaUserInsufficient             = "quota.user_insufficient"
+ 	MsgQuotaPreConsumeInsufficient       = "quota.pre_consume_insufficient"
+diff --git a/i18n/locales/en.yaml b/i18n/locales/en.yaml
+index d133ffa..f7976c9 100644
+--- a/i18n/locales/en.yaml
++++ b/i18n/locales/en.yaml
+@@ -25,6 +25,7 @@ distributor.group_access_denied: "No permission to access this group"
+ distributor.get_channel_failed: "Failed to get available channel for model {{.Model}} under group {{.Group}} (distributor): {{.Error}}"
+ distributor.no_available_channel: "No available channel for model {{.Model}} under group {{.Group}} (distributor)"
+ distributor.no_available_channel_task_plugin: "No available channel for model {{.Model}} under group {{.Group}}: the model is claimed by a task plugin, which has no enabled channel serving it (distributor)"
++distributor.channel_daily_token_limit_exceeded: "No available channel for model {{.Model}} under group {{.Group}}: all candidate channels have reached their daily token limit"
+ distributor.invalid_request_parse_model: "unable to parse model"
+ quota.user_insufficient: "Insufficient user quota, remaining quota: {{.Remaining}}"
+ quota.pre_consume_insufficient: "Not enough quota to pre-consume for this request: {{.Remaining}} remaining, {{.Required}} required"
+diff --git a/i18n/locales/zh-CN.yaml b/i18n/locales/zh-CN.yaml
+index 7b5d8ff..f4504c8 100644
+--- a/i18n/locales/zh-CN.yaml
++++ b/i18n/locales/zh-CN.yaml
+@@ -26,6 +26,7 @@ distributor.group_access_denied: "无权访问该分组"
+ distributor.get_channel_failed: "获取分组 {{.Group}} 下模型 {{.Model}} 的可用渠道失败（distributor）：{{.Error}}"
+ distributor.no_available_channel: "分组 {{.Group}} 下模型 {{.Model}} 无可用渠道（distributor）"
+ distributor.no_available_channel_task_plugin: "分组 {{.Group}} 下模型 {{.Model}} 无可用渠道：该模型由任务插件认领，但当前没有启用的渠道可服务此模型（distributor）"
++distributor.channel_daily_token_limit_exceeded: "分组 {{.Group}} 下模型 {{.Model}} 无可用渠道：所有候选渠道均已达到每日 Token 限额"
+ distributor.invalid_request_parse_model: "无法解析模型"
+ quota.user_insufficient: "用户额度不足, 剩余额度: {{.Remaining}}"
+ quota.pre_consume_insufficient: "预扣费额度失败, 用户剩余额度: {{.Remaining}}, 需要预扣费额度: {{.Required}}"
+diff --git a/i18n/locales/zh-TW.yaml b/i18n/locales/zh-TW.yaml
+index 0cf8dad..905d167 100644
+--- a/i18n/locales/zh-TW.yaml
++++ b/i18n/locales/zh-TW.yaml
+@@ -26,6 +26,7 @@ distributor.group_access_denied: "無權存取該分組"
+ distributor.get_channel_failed: "獲取分組 {{.Group}} 下模型 {{.Model}} 的可用管道失敗（distributor）：{{.Error}}"
+ distributor.no_available_channel: "分組 {{.Group}} 下模型 {{.Model}} 無可用管道（distributor）"
+ distributor.no_available_channel_task_plugin: "分組 {{.Group}} 下模型 {{.Model}} 無可用管道：該模型由任務插件認領，但目前沒有啟用的管道可服務此模型（distributor）"
++distributor.channel_daily_token_limit_exceeded: "分組 {{.Group}} 下模型 {{.Model}} 無可用管道：所有候選管道均已達到每日 Token 限額"
+ distributor.invalid_request_parse_model: "無法解析模型"
+ quota.user_insufficient: "使用者額度不足，剩餘額度：{{.Remaining}}"
+ quota.pre_consume_insufficient: "預扣費額度失敗，使用者剩餘額度：{{.Remaining}}，需要預扣費額度：{{.Required}}"
+diff --git a/model/ability.go b/model/ability.go
+index be41187..5f3adde 100644
+--- a/model/ability.go
++++ b/model/ability.go
+@@ -116,7 +116,8 @@ func GetChannel(
+ 	if err != nil {
+ 		return nil, err
+ 	}
+-	abilities = filterAbilitiesByConstraints(abilities, model, filters)
++	abilities, emptiedBy := filterAbilitiesByConstraints(abilities, model, filters)
++	dailyLimited := len(abilities) == 0 && emptiedBy == dto.FilterDailyTokenLimit
+ 	// Like the memory cache, retry with the routing name (for example without
+ 	// @ modifiers) when no channel serves the exact name.
+ 	if normalized := ratio_setting.RoutingMatchModelName(model); len(abilities) == 0 && normalized != "" && normalized != model {
+@@ -124,7 +125,10 @@ func GetChannel(
+ 		if err != nil {
+ 			return nil, err
+ 		}
+-		abilities = filterAbilitiesByConstraints(abilities, model, filters)
++		abilities, emptiedBy = filterAbilitiesByConstraints(abilities, model, filters)
++		if len(abilities) == 0 && emptiedBy == dto.FilterDailyTokenLimit {
++			dailyLimited = true
++		}
+ 	}
+ 	if len(abilities) > 0 {
+ 		priorities := make([]int64, 0)
+@@ -166,6 +170,9 @@ func GetChannel(
+ 			}
+ 		}
+ 	} else {
++		if dailyLimited {
++			return nil, ErrChannelDailyTokenLimit
++		}
+ 		return nil, nil
+ 	}
+ 	err = DB.First(&channel, "id = ?", channel.Id).Error
+@@ -175,9 +182,9 @@ func GetChannel(
+ // filterAbilitiesByConstraints applies the same ChannelSatisfiesFilters
+ // predicate used by the memory-cache path. A failed channel lookup fails
+ // closed when a task-plugin identity is required and fails open otherwise.
+-func filterAbilitiesByConstraints(abilities []Ability, modelName string, filters []dto.ChannelFilter) []Ability {
++func filterAbilitiesByConstraints(abilities []Ability, modelName string, filters []dto.ChannelFilter) ([]Ability, dto.ChannelFilterKind) {
+ 	if len(abilities) == 0 {
+-		return nil
++		return nil, ""
+ 	}
+ 
+ 	channelIds := make([]int, 0, len(abilities))
+@@ -193,9 +200,9 @@ func filterAbilitiesByConstraints(abilities []Ability, modelName string, filters
+ 	var channels []*Channel
+ 	if err := DB.Where("id IN ?", channelIds).Find(&channels).Error; err != nil {
+ 		if identityFilterRequiresKey(filters) {
+-			return nil
++			return nil, ""
+ 		}
+-		return abilities
++		return abilities, ""
+ 	}
+ 
+ 	channelsByID := make(map[int]*Channel, len(channels))
+@@ -204,13 +211,25 @@ func filterAbilitiesByConstraints(abilities []Ability, modelName string, filters
+ 	}
+ 
+ 	filtered := make([]Ability, 0, len(abilities))
++	dailyLimited := 0
++	otherFiltered := 0
+ 	for _, ability := range abilities {
+ 		channel := channelsByID[ability.ChannelId]
+-		if ok, _ := ChannelSatisfiesFilters(channel, modelName, filters); ok {
++		ok, kind := ChannelSatisfiesFilters(channel, modelName, filters)
++		if ok {
+ 			filtered = append(filtered, ability)
++			continue
+ 		}
++		if kind == dto.FilterDailyTokenLimit {
++			dailyLimited++
++		} else {
++			otherFiltered++
++		}
++	}
++	if len(filtered) == 0 && dailyLimited > 0 && otherFiltered == 0 {
++		return filtered, dto.FilterDailyTokenLimit
+ 	}
+-	return filtered
++	return filtered, ""
+ }
+ 
+ func identityFilterRequiresKey(filters []dto.ChannelFilter) bool {
+diff --git a/model/channel_cache.go b/model/channel_cache.go
+index 5bdf140..8a516b9 100644
+--- a/model/channel_cache.go
++++ b/model/channel_cache.go
+@@ -129,15 +129,22 @@ func GetRandomSatisfiedChannel(
+ 	defer channelSyncLock.RUnlock()
+ 
+ 	// First, try to find channels with the exact model name.
+-	channels, _ := filterCandidateIDs(group2model2channels[group][model], model, filters)
++	channels, emptiedBy := filterCandidateIDs(group2model2channels[group][model], model, filters)
++	dailyLimited := len(channels) == 0 && emptiedBy == dto.FilterDailyTokenLimit
+ 
+ 	// If no channels found, try to find channels with the normalized model name.
+ 	if len(channels) == 0 {
+ 		normalizedModel := ratio_setting.RoutingMatchModelName(model)
+-		channels, _ = filterCandidateIDs(group2model2channels[group][normalizedModel], model, filters)
++		channels, emptiedBy = filterCandidateIDs(group2model2channels[group][normalizedModel], model, filters)
++		if len(channels) == 0 && emptiedBy == dto.FilterDailyTokenLimit {
++			dailyLimited = true
++		}
+ 	}
+ 
+ 	if len(channels) == 0 {
++		if dailyLimited {
++			return nil, ErrChannelDailyTokenLimit
++		}
+ 		return nil, nil
+ 	}
+ 
+diff --git a/model/channel_constraint.go b/model/channel_constraint.go
+index 81c1541..874c551 100644
+--- a/model/channel_constraint.go
++++ b/model/channel_constraint.go
+@@ -8,6 +8,7 @@ import (
+ )
+ 
+ var filterEvalOrder = []dto.ChannelFilterKind{
++	dto.FilterDailyTokenLimit,
+ 	dto.FilterRequestPath,
+ 	dto.FilterTaskPluginEndpoint,
+ 	dto.FilterTaskPluginIdentity,
+@@ -22,6 +23,12 @@ func ChannelSatisfiesFilters(ch *Channel, modelName string, filters []dto.Channe
+ 		return false, ""
+ 	}
+ 	for _, kind := range filterEvalOrder {
++		if kind == dto.FilterDailyTokenLimit {
++			if !channelWithinDailyTokenLimit(ch) {
++				return false, kind
++			}
++			continue
++		}
+ 		for _, filter := range filters {
+ 			if filter.Kind != kind {
+ 				continue
+@@ -44,6 +51,22 @@ func filterCandidateIDs(ids []int, modelName string, filters []dto.ChannelFilter
+ 	}
+ 	kept = ids
+ 	for _, kind := range filterEvalOrder {
++		if kind == dto.FilterDailyTokenLimit {
++			next := make([]int, 0, len(kept))
++			for _, id := range kept {
++				channel, exists := channelsIDM[id]
++				// Preserve missing ids so the downstream consistency error is
++				// still reported instead of being masked by the daily cap.
++				if !exists || channelWithinDailyTokenLimit(channel) {
++					next = append(next, id)
++				}
++			}
++			if len(kept) > 0 && len(next) == 0 {
++				return next, kind
++			}
++			kept = next
++			continue
++		}
+ 		kindFilters := filtersByKind(filters, kind)
+ 		if len(kindFilters) == 0 {
+ 			continue
+@@ -122,6 +145,8 @@ func channelMatchesFilter(ch *Channel, modelName string, filter dto.ChannelFilte
+ 		// group, priority, weight, affinity, and pin rules. Unrelated type-61
+ 		// plugins cannot execute this endpoint.
+ 		return ch.Type != constant.ChannelTypeTaskPlugin || pluginChannel
++	case dto.FilterDailyTokenLimit:
++		return channelWithinDailyTokenLimit(ch)
+ 	case dto.FilterResponsesWebSocket:
+ 		if !ch.GetSetting().ResponsesWebSocketEnabled {
+ 			return false
+diff --git a/model/channel_daily_limit.go b/model/channel_daily_limit.go
+new file mode 100644
+index 0000000..8cc4a77
+--- /dev/null
++++ b/model/channel_daily_limit.go
+@@ -0,0 +1,18 @@
++package model
++
++import (
++	"errors"
++
++	"github.com/QuantumNous/new-api/common"
++)
++
++// ErrChannelDailyTokenLimit means the model has candidate channels, but all of
++// them reached their per-day token limit.
++var ErrChannelDailyTokenLimit = errors.New("all candidate channels reached daily token limit")
++
++func channelWithinDailyTokenLimit(channel *Channel) bool {
++	if channel == nil {
++		return true
++	}
++	return common.IsChannelDailyTokenUsageAvailable(channel.Id, channel.GetSetting().DailyTokenLimit)
++}
+diff --git a/model/channel_daily_limit_test.go b/model/channel_daily_limit_test.go
+new file mode 100644
+index 0000000..1fed403
+--- /dev/null
++++ b/model/channel_daily_limit_test.go
+@@ -0,0 +1,72 @@
++package model
++
++import (
++	"fmt"
++	"testing"
++
++	"github.com/QuantumNous/new-api/common"
++	"github.com/QuantumNous/new-api/dto"
++)
++
++func useDailyLimitFallbackForTest(t *testing.T) {
++	t.Helper()
++	oldEnabled, oldRDB := common.RedisEnabled, common.RDB
++	common.RedisEnabled, common.RDB = false, nil
++	t.Cleanup(func() {
++		common.RedisEnabled, common.RDB = oldEnabled, oldRDB
++	})
++}
++
++func channelWithDailyLimit(id int, limit int64) *Channel {
++	setting := fmt.Sprintf(`{"daily_token_limit":%d}`, limit)
++	return &Channel{Id: id, Setting: &setting}
++}
++
++func TestChannelSatisfiesFiltersDailyTokenLimit(t *testing.T) {
++	useDailyLimitFallbackForTest(t)
++
++	channelID := 990002
++	channel := channelWithDailyLimit(channelID, 10)
++
++	if ok, kind := ChannelSatisfiesFilters(channel, "test-model", nil); !ok || kind != "" {
++		t.Fatalf("fresh channel: ok=%v kind=%q", ok, kind)
++	}
++	if err := common.IncreaseChannelDailyTokenUsage(channelID, 10); err != nil {
++		t.Fatalf("increase usage: %v", err)
++	}
++	ok, kind := ChannelSatisfiesFilters(channel, "test-model", nil)
++	if ok {
++		t.Fatal("channel at its daily limit must be rejected")
++	}
++	if kind != dto.FilterDailyTokenLimit {
++		t.Fatalf("kind = %q, want %q", kind, dto.FilterDailyTokenLimit)
++	}
++}
++
++func TestFilterCandidateIDsDailyTokenLimit(t *testing.T) {
++	useDailyLimitFallbackForTest(t)
++
++	oldChannels := channelsIDM
++	channelsIDM = map[int]*Channel{
++		990003: channelWithDailyLimit(990003, 5),
++		990004: channelWithDailyLimit(990004, 10),
++	}
++	t.Cleanup(func() { channelsIDM = oldChannels })
++
++	if err := common.IncreaseChannelDailyTokenUsage(990004, 10); err != nil {
++		t.Fatalf("increase usage: %v", err)
++	}
++
++	kept, kind := filterCandidateIDs([]int{990003, 990004}, "test-model", nil)
++	if len(kept) != 1 || kept[0] != 990003 || kind != "" {
++		t.Fatalf("kept=%v kind=%q, want [990003] and empty kind", kept, kind)
++	}
++
++	if err := common.IncreaseChannelDailyTokenUsage(990003, 5); err != nil {
++		t.Fatalf("increase usage: %v", err)
++	}
++	kept, kind = filterCandidateIDs([]int{990003, 990004}, "test-model", nil)
++	if len(kept) != 0 || kind != dto.FilterDailyTokenLimit {
++		t.Fatalf("kept=%v kind=%q, want empty and %q", kept, kind, dto.FilterDailyTokenLimit)
++	}
++}
+diff --git a/model/task_plugin_channel_select_test.go b/model/task_plugin_channel_select_test.go
+index 8daa050..27a6f3f 100644
+--- a/model/task_plugin_channel_select_test.go
++++ b/model/task_plugin_channel_select_test.go
+@@ -72,7 +72,8 @@ func TestSharedPluginKeysFilterBothChannelSources(t *testing.T) {
+ 		matches, _ := ChannelSatisfiesFilters(&channel, "shared", filters)
+ 		assert.Equal(t, index < 2, matches)
+ 	}
+-	assert.Equal(t, abilities[:2], filterAbilitiesByConstraints(abilities, "shared", filters))
++	filtered, _ := filterAbilitiesByConstraints(abilities, "shared", filters)
++	assert.Equal(t, abilities[:2], filtered)
+ 	InitChannelCache()
+ 	channelSyncLock.RLock()
+ 	kept, emptied := filterCandidateIDs([]int{910001, 910002, 910003}, "shared", filters)
+diff --git a/relaykit/dto/channel_settings.go b/relaykit/dto/channel_settings.go
+index 2f82e5b..53fd3af 100644
+--- a/relaykit/dto/channel_settings.go
++++ b/relaykit/dto/channel_settings.go
+@@ -35,6 +35,9 @@ type ChannelSettings struct {
+ 	// TLSInsecureSkipVerify accepts upstream certificates that fail
+ 	// verification, such as self-signed ones, for this channel only.
+ 	TLSInsecureSkipVerify bool `json:"tls_insecure_skip_verify,omitempty"`
++	// DailyTokenLimit caps billable input + output tokens per channel per local
++	// day. Zero or negative means unlimited.
++	DailyTokenLimit int64 `json:"daily_token_limit,omitempty"`
+ }
+ 
+ // BindsTaskPlugin reports whether the channel is bound to the task plugin,
+diff --git a/relaykit/types/error.go b/relaykit/types/error.go
+index d92a9cb..8c980d1 100644
+--- a/relaykit/types/error.go
++++ b/relaykit/types/error.go
+@@ -52,13 +52,14 @@ const (
+ 	ErrorCodeGenRelayInfoFailed ErrorCode = "gen_relay_info_failed"
+ 
+ 	// channel error
+-	ErrorCodeChannelNoAvailableKey        ErrorCode = "channel:no_available_key"
+-	ErrorCodeChannelParamOverrideInvalid  ErrorCode = "channel:param_override_invalid"
+-	ErrorCodeChannelHeaderOverrideInvalid ErrorCode = "channel:header_override_invalid"
+-	ErrorCodeChannelModelMappedError      ErrorCode = "channel:model_mapped_error"
+-	ErrorCodeChannelAwsClientError        ErrorCode = "channel:aws_client_error"
+-	ErrorCodeChannelInvalidKey            ErrorCode = "channel:invalid_key"
+-	ErrorCodeChannelResponseTimeExceeded  ErrorCode = "channel:response_time_exceeded"
++	ErrorCodeChannelNoAvailableKey          ErrorCode = "channel:no_available_key"
++	ErrorCodeChannelParamOverrideInvalid    ErrorCode = "channel:param_override_invalid"
++	ErrorCodeChannelHeaderOverrideInvalid   ErrorCode = "channel:header_override_invalid"
++	ErrorCodeChannelModelMappedError        ErrorCode = "channel:model_mapped_error"
++	ErrorCodeChannelAwsClientError          ErrorCode = "channel:aws_client_error"
++	ErrorCodeChannelInvalidKey              ErrorCode = "channel:invalid_key"
++	ErrorCodeChannelResponseTimeExceeded    ErrorCode = "channel:response_time_exceeded"
++	ErrorCodeChannelDailyTokenLimitExceeded ErrorCode = "channel:daily_token_limit_exceeded"
+ 
+ 	// client request error
+ 	ErrorCodeReadRequestBodyFailed ErrorCode = "read_request_body_failed"
+diff --git a/service/channel_daily_limit.go b/service/channel_daily_limit.go
+new file mode 100644
+index 0000000..cb230e9
+--- /dev/null
++++ b/service/channel_daily_limit.go
+@@ -0,0 +1,14 @@
++package service
++
++import (
++	"fmt"
++
++	"github.com/QuantumNous/new-api/common"
++)
++
++func IncreaseChannelDailyTokenUsage(channelID int, tokens int64) error {
++	if err := common.IncreaseChannelDailyTokenUsage(channelID, tokens); err != nil {
++		return fmt.Errorf("channel daily token usage NOT recorded, daily limit may not take effect: channel_id=%d, tokens=%d: %w", channelID, tokens, err)
++	}
++	return nil
++}
+diff --git a/service/channel_select.go b/service/channel_select.go
+index 113e4a3..9f473e3 100644
+--- a/service/channel_select.go
++++ b/service/channel_select.go
+@@ -128,6 +128,7 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string,
+ 		// startGroupIndex: 开始搜索的分组索引
+ 		startGroupIndex := 0
+ 		crossGroupRetry := common.GetContextKeyBool(param.Ctx, constant.ContextKeyTokenCrossGroupRetry)
++		dailyLimited := false
+ 
+ 		if lastGroupIndex, exists := common.GetContextKey(param.Ctx, constant.ContextKeyAutoGroupIndex); exists {
+ 			if idx, ok := lastGroupIndex.(int); ok {
+@@ -147,12 +148,15 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string,
+ 			}
+ 			logger.LogDebug(param.Ctx, "Auto selecting group: %s, priorityRetry: %d", autoGroup, priorityRetry)
+ 
+-			channel, _ = model.GetRandomSatisfiedChannel(
++			channel, err = model.GetRandomSatisfiedChannel(
+ 				autoGroup,
+ 				param.ModelName,
+ 				priorityRetry,
+ 				filters,
+ 			)
++			if err != nil && errors.Is(err, model.ErrChannelDailyTokenLimit) {
++				dailyLimited = true
++			}
+ 			if channel == nil {
+ 				// Current group has no available channel for this model, try next group
+ 				// 当前分组没有该模型的可用渠道，尝试下一个分组
+@@ -189,6 +193,9 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string,
+ 			}
+ 			break
+ 		}
++		if channel == nil && dailyLimited {
++			return nil, selectGroup, model.ErrChannelDailyTokenLimit
++		}
+ 	} else {
+ 		channel, err = model.GetRandomSatisfiedChannel(
+ 			param.TokenGroup,
+@@ -297,6 +304,9 @@ func SelectChannelForRequest(c *gin.Context, modelName string, retry *RetryParam
+ 			return nil, "", pinnedChannelUnavailable(pin, http.StatusForbidden, i18n.MsgDistributorChannelDisabled)
+ 		}
+ 		if ok, kind := model.ChannelSatisfiesFilters(channel, modelName, constraints.Filters); !ok {
++			if kind == dto.FilterDailyTokenLimit {
++				return nil, "", dailyTokenLimitExceededError(modelName, common.GetContextKeyString(c, constant.ContextKeyUsingGroup), channel)
++			}
+ 			return nil, "", &ChannelSelectError{
+ 				StatusCode: http.StatusBadRequest, Code: types.ErrorCode(kind), MessageID: i18n.MsgDistributorNoAvailableChannel,
+ 				Params:     map[string]any{"Group": common.GetContextKeyString(c, constant.ContextKeyUsingGroup), "Model": modelName},
+@@ -354,6 +364,9 @@ func SelectChannelForRequest(c *gin.Context, modelName string, retry *RetryParam
+ 			if usingGroup == "auto" {
+ 				showGroup = fmt.Sprintf("auto(%s)", selectGroup)
+ 			}
++			if errors.Is(err, model.ErrChannelDailyTokenLimit) {
++				return nil, selectGroup, dailyTokenLimitExceededError(modelName, showGroup, nil)
++			}
+ 			return nil, selectGroup, &ChannelSelectError{
+ 				StatusCode: http.StatusServiceUnavailable, Code: types.ErrorCodeModelNotFound, MessageID: i18n.MsgDistributorGetChannelFailed,
+ 				Params: map[string]any{"Group": showGroup, "Model": modelName, "Error": err.Error()},
+@@ -367,6 +380,9 @@ func SelectChannelForRequest(c *gin.Context, modelName string, retry *RetryParam
+ 		}
+ 	}
+ 	if ok, kind := model.ChannelSatisfiesFilters(channel, modelName, constraints.Filters); !ok {
++		if kind == dto.FilterDailyTokenLimit {
++			return nil, selectGroup, dailyTokenLimitExceededError(modelName, common.GetContextKeyString(c, constant.ContextKeyUsingGroup), channel)
++		}
+ 		return nil, selectGroup, &ChannelSelectError{
+ 			StatusCode: http.StatusServiceUnavailable, Code: types.ErrorCodeModelNotFound, MessageID: i18n.MsgDistributorNoAvailableChannel,
+ 			Params:     map[string]any{"Group": common.GetContextKeyString(c, constant.ContextKeyUsingGroup), "Model": modelName},
+@@ -376,6 +392,17 @@ func SelectChannelForRequest(c *gin.Context, modelName string, retry *RetryParam
+ 	return channel, selectGroup, nil
+ }
+ 
++func dailyTokenLimitExceededError(modelName, group string, channel *model.Channel) *ChannelSelectError {
++	return &ChannelSelectError{
++		StatusCode: http.StatusTooManyRequests,
++		Code:       types.ErrorCodeChannelDailyTokenLimitExceeded,
++		MessageID:  i18n.MsgDistributorChannelDailyTokenLimitExceeded,
++		Params:     map[string]any{"Group": group, "Model": modelName},
++		FilterKind: dto.FilterDailyTokenLimit,
++		Channel:    channel,
++	}
++}
++
+ // Origin-task pins report a fixed code so task polling can tell a retired
+ // channel from a malformed request.
+ func pinnedChannelUnavailable(pin dto.ChannelPin, statusCode int, messageID string) *ChannelSelectError {
+diff --git a/service/quota.go b/service/quota.go
+index 6dd9ab0..54031ed 100644
+--- a/service/quota.go
++++ b/service/quota.go
+@@ -233,6 +233,9 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
+ 	} else {
+ 		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, quota)
+ 		model.UpdateChannelUsedQuota(relayInfo.ChannelId, quota)
++		if err := IncreaseChannelDailyTokenUsage(relayInfo.ChannelId, int64(usage.InputTokens+usage.OutputTokens)); err != nil {
++			logger.LogError(ctx, common.LogText("channel daily token usage not recorded: %s", err.Error()))
++		}
+ 	}
+ 
+ 	if err := SettleBilling(ctx, relayInfo, quota); err != nil {
+@@ -372,6 +375,9 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
+ 	} else {
+ 		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, quota)
+ 		model.UpdateChannelUsedQuota(relayInfo.ChannelId, quota)
++		if err := IncreaseChannelDailyTokenUsage(relayInfo.ChannelId, int64(usage.PromptTokens+usage.CompletionTokens)); err != nil {
++			logger.LogError(ctx, common.LogText("channel daily token usage not recorded: %s", err.Error()))
++		}
+ 	}
+ 
+ 	if err := SettleBilling(ctx, relayInfo, quota); err != nil {
+diff --git a/service/task_polling.go b/service/task_polling.go
+index 868eea5..ca3723a 100644
+--- a/service/task_polling.go
++++ b/service/task_polling.go
+@@ -719,6 +719,9 @@ func settleTaskBillingOnComplete(ctx context.Context, adaptor TaskPollingAdaptor
+ 		tokens = taskResult.CompletionTokens
+ 	}
+ 	if tokens > 0 {
++		if err := IncreaseChannelDailyTokenUsage(task.ChannelId, int64(tokens)); err != nil {
++			logger.LogError(ctx, common.LogText("channel daily token usage not recorded: %s", err.Error()))
++		}
+ 		return RecalculateTaskQuotaByTokens(ctx, task, tokens)
+ 	}
+ 	return false
+diff --git a/service/text_quota.go b/service/text_quota.go
+index 03a0a31..3ac014b 100644
+--- a/service/text_quota.go
++++ b/service/text_quota.go
+@@ -461,6 +461,12 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
+ 	} else {
+ 		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, summary.Quota)
+ 		model.UpdateChannelUsedQuota(relayInfo.ChannelId, summary.Quota)
++		// Daily caps count billable input + output only; cache hits and cache
++		// creation are excluded, matching what upstreams charge against their
++		// own daily allowances.
++		if err := IncreaseChannelDailyTokenUsage(relayInfo.ChannelId, int64(summary.PromptTokens+summary.CompletionTokens)); err != nil {
++			logger.LogError(ctx, common.LogText("channel daily token usage not recorded: %s", err.Error()))
++		}
+ 	}
+ 
+ 	if err := SettleBilling(ctx, relayInfo, summary.Quota); err != nil {
+diff --git a/web/src/features/channels/components/drawers/channel-mutate-drawer.tsx b/web/src/features/channels/components/drawers/channel-mutate-drawer.tsx
+index a1b527d..a0dd530 100644
+--- a/web/src/features/channels/components/drawers/channel-mutate-drawer.tsx
++++ b/web/src/features/channels/components/drawers/channel-mutate-drawer.tsx
+@@ -298,6 +298,7 @@ const SENSITIVE_FORM_FIELDS = [
+   'azure_responses_version',
+   'force_format',
+   'thinking_to_content',
++  'daily_token_limit',
+   'proxy',
+   'http_protocol',
+   'http2_connection_shards',
+@@ -1797,6 +1798,37 @@ export function ChannelMutateDrawer({
+     [onOpenChange, form, isSubmitting, showProviderPicker, providerTarget]
+   )
+ 
++  const dailyTokenLimitFields = (
++    <FormField
++      control={form.control}
++      name='daily_token_limit'
++      render={({ field }) => (
++        <FormItem>
++          <FormLabel>{t('Daily Token Limit')}</FormLabel>
++          <FormControl>
++            <Input
++              type='number'
++              min={0}
++              step={1}
++              placeholder={t('0 means unlimited')}
++              {...field}
++              value={field.value ?? 0}
++              onChange={(event) =>
++                field.onChange(Number(event.target.value) || 0)
++              }
++            />
++          </FormControl>
++          <FormDescription>
++            {t(
++              'Maximum billable input + output tokens per channel per day. 0 means unlimited.'
++            )}
++          </FormDescription>
++          <FormMessage />
++        </FormItem>
++      )}
++    />
++  )
++
+   const proxyFields = (
+     <FormField
+       control={form.control}
+@@ -4786,6 +4818,7 @@ export function ChannelMutateDrawer({
+                 className='space-y-4 disabled:opacity-60'
+               >
+                 {taskPollingFields}
++                {dailyTokenLimitFields}
+                 {proxyFields}
+                 {httpProtocolFields}
+                 {httpShardsFields}
+diff --git a/web/src/features/channels/lib/channel-form.ts b/web/src/features/channels/lib/channel-form.ts
+index 158f510..9cc185d 100644
+--- a/web/src/features/channels/lib/channel-form.ts
++++ b/web/src/features/channels/lib/channel-form.ts
+@@ -263,6 +263,7 @@ export const channelFormSchema = z
+     // Channel extra settings (stored in setting JSON, not sent directly)
+     force_format: z.boolean().optional(),
+     thinking_to_content: z.boolean().optional(),
++    daily_token_limit: z.number().int().min(0).optional(),
+     proxy: z
+       .string()
+       .optional()
+@@ -460,6 +461,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
+   // Channel extra settings
+   force_format: false,
+   thinking_to_content: false,
++  daily_token_limit: 0,
+   proxy: '',
+   http_protocol: HTTP_PROTOCOL_AUTO,
+   http2_connection_shards: 1,
+@@ -507,6 +509,7 @@ export function transformChannelToFormDefaults(
+     task_extend_plugin_keys: [] as string[],
+     force_format: false,
+     thinking_to_content: false,
++    daily_token_limit: 0,
+     proxy: '',
+     http_protocol: HTTP_PROTOCOL_AUTO as 'auto' | 'http1',
+     http2_connection_shards: 1,
+@@ -529,6 +532,7 @@ export function transformChannelToFormDefaults(
+         task_extend_plugin_keys: readTaskExtendPluginKeys(channel.type, parsed),
+         force_format: parsed.force_format || false,
+         thinking_to_content: parsed.thinking_to_content || false,
++        daily_token_limit: Number(parsed.daily_token_limit) || 0,
+         proxy: parsed.proxy || '',
+         http_protocol: protocol,
+         http2_connection_shards: protocol === HTTP_PROTOCOL_HTTP1 ? 1 : shards,
+@@ -669,6 +673,10 @@ export function buildSettingJSON(formData: ChannelFormValues): string {
+         : undefined,
+     force_format: formData.force_format || false,
+     thinking_to_content: formData.thinking_to_content || false,
++    daily_token_limit:
++      formData.daily_token_limit && formData.daily_token_limit > 0
++        ? formData.daily_token_limit
++        : undefined,
+     proxy: formData.proxy?.trim() || '',
+     pass_through_body_enabled: formData.pass_through_body_enabled === true,
+     responses_websocket_enabled:
+diff --git a/web/src/features/channels/types.ts b/web/src/features/channels/types.ts
+index 721e216..34e693f 100644
+--- a/web/src/features/channels/types.ts
++++ b/web/src/features/channels/types.ts
+@@ -84,6 +84,7 @@ export interface ChannelSettings {
+   task_extend_plugin_keys?: string[]
+   force_format?: boolean
+   thinking_to_content?: boolean
++  daily_token_limit?: number
+   proxy?: string
+   pass_through_body_enabled?: boolean
+   responses_websocket_enabled?: boolean
+diff --git a/web/src/i18n/locales/en.json b/web/src/i18n/locales/en.json
+index ad1ed53..798cda4 100644
+--- a/web/src/i18n/locales/en.json
++++ b/web/src/i18n/locales/en.json
+@@ -6318,6 +6318,9 @@
+     "These values come from the source index and are shown for review only. The gateway admits the plugin based on the metadata compiled from its source.": "These values come from the source index and are shown for review only. The gateway admits the plugin based on the metadata compiled from its source.",
+     "Thinking Suffix Adapter": "Thinking Suffix Adapter",
+     "Thinking to Content": "Thinking to Content",
++    "Daily Token Limit": "Daily Token Limit",
++    "0 means unlimited": "0 means unlimited",
++    "Maximum billable input + output tokens per channel per day. 0 means unlimited.": "Maximum billable input + output tokens per channel per day. 0 means unlimited.",
+     "Thinking...": "Thinking...",
+     "Third-party": "Third-party",
+     "Third-party — use at your own risk": "Third-party — use at your own risk",
+diff --git a/web/src/i18n/locales/fr.json b/web/src/i18n/locales/fr.json
+index 347d231..e361663 100644
+--- a/web/src/i18n/locales/fr.json
++++ b/web/src/i18n/locales/fr.json
+@@ -6318,6 +6318,9 @@
+     "These values come from the source index and are shown for review only. The gateway admits the plugin based on the metadata compiled from its source.": "Ces valeurs proviennent de l’index de la source et sont affichées à titre d’examen uniquement. La passerelle admet le plugin d’après les métadonnées compilées depuis son code.",
+     "Thinking Suffix Adapter": "Adaptateur de suffixe thinking",
+     "Thinking to Content": "Réflexion vers Contenu",
++    "Daily Token Limit": "Limite quotidienne de tokens",
++    "0 means unlimited": "0 signifie illimité",
++    "Maximum billable input + output tokens per channel per day. 0 means unlimited.": "Nombre maximal de tokens facturables (entrée + sortie) par canal et par jour. 0 signifie illimité.",
+     "Thinking...": "Réflexion...",
+     "Third-party": "Tiers",
+     "Third-party — use at your own risk": "Tiers — à vos risques et périls",
+diff --git a/web/src/i18n/locales/ja.json b/web/src/i18n/locales/ja.json
+index 944adc2..d2f3c78 100644
+--- a/web/src/i18n/locales/ja.json
++++ b/web/src/i18n/locales/ja.json
+@@ -6318,6 +6318,9 @@
+     "These values come from the source index and are shown for review only. The gateway admits the plugin based on the metadata compiled from its source.": "これらの値はソースのインデックス由来で、確認のために表示しているだけです。ゲートウェイはソースからコンパイルされた実際のメタデータに基づいてプラグインを受け入れます。",
+     "Thinking Suffix Adapter": "思考サフィックスアダプター",
+     "Thinking to Content": "思考からコンテンツへ",
++    "Daily Token Limit": "1日あたりのトークン上限",
++    "0 means unlimited": "0 は無制限を意味します",
++    "Maximum billable input + output tokens per channel per day. 0 means unlimited.": "チャネルごとの1日あたりの課金対象入力＋出力トークン上限。0 は無制限を意味します。",
+     "Thinking...": "思考中...",
+     "Third-party": "サードパーティ",
+     "Third-party — use at your own risk": "サードパーティ — 自己責任",
+diff --git a/web/src/i18n/locales/ru.json b/web/src/i18n/locales/ru.json
+index c2d954e..f814297 100644
+--- a/web/src/i18n/locales/ru.json
++++ b/web/src/i18n/locales/ru.json
+@@ -6318,6 +6318,9 @@
+     "These values come from the source index and are shown for review only. The gateway admits the plugin based on the metadata compiled from its source.": "Эти значения взяты из индекса источника и показаны только для проверки. Шлюз допускает плагин по метаданным, скомпилированным из его кода.",
+     "Thinking Suffix Adapter": "Адаптер суффикса thinking",
+     "Thinking to Content": "Мышление в контент",
++    "Daily Token Limit": "Суточный лимит токенов",
++    "0 means unlimited": "0 означает без ограничений",
++    "Maximum billable input + output tokens per channel per day. 0 means unlimited.": "Максимум оплачиваемых входных и выходных токенов на канал в день. 0 означает без ограничений.",
+     "Thinking...": "Размышление...",
+     "Third-party": "Сторонний",
+     "Third-party — use at your own risk": "Сторонний — на ваш риск",
+diff --git a/web/src/i18n/locales/vi.json b/web/src/i18n/locales/vi.json
+index 9f9f8cf..b4fee7c 100644
+--- a/web/src/i18n/locales/vi.json
++++ b/web/src/i18n/locales/vi.json
+@@ -6318,6 +6318,9 @@
+     "These values come from the source index and are shown for review only. The gateway admits the plugin based on the metadata compiled from its source.": "Các giá trị này lấy từ chỉ mục của nguồn và chỉ để bạn xem xét. Cổng quyết định chấp nhận plugin dựa trên metadata biên dịch từ mã nguồn của nó.",
+     "Thinking Suffix Adapter": "Adapter hậu tố thinking",
+     "Thinking to Content": "Suy nghĩ thành Nội dung",
++    "Daily Token Limit": "Giới hạn token hàng ngày",
++    "0 means unlimited": "0 nghĩa là không giới hạn",
++    "Maximum billable input + output tokens per channel per day. 0 means unlimited.": "Số token đầu vào + đầu ra có thể tính phí tối đa mỗi kênh mỗi ngày. 0 nghĩa là không giới hạn.",
+     "Thinking...": "Đang suy nghĩ...",
+     "Third-party": "Bên thứ ba",
+     "Third-party — use at your own risk": "Bên thứ ba — tự chịu rủi ro",
+diff --git a/web/src/i18n/locales/zh-TW.json b/web/src/i18n/locales/zh-TW.json
+index 9ab638b..d6df0f8 100644
+--- a/web/src/i18n/locales/zh-TW.json
++++ b/web/src/i18n/locales/zh-TW.json
+@@ -6318,6 +6318,9 @@
+     "These values come from the source index and are shown for review only. The gateway admits the plugin based on the metadata compiled from its source.": "這些值來自來源索引，僅供審查參考。閘道的准入判定只依據從原始碼編譯出的真實中介資料。",
+     "Thinking Suffix Adapter": "思考後綴配接器",
+     "Thinking to Content": "思維到內容",
++    "Daily Token Limit": "每日 Token 限額",
++    "0 means unlimited": "0 表示不限制",
++    "Maximum billable input + output tokens per channel per day. 0 means unlimited.": "每個管道每天可計費的輸入 + 輸出 Token 上限。0 表示不限制。",
+     "Thinking...": "思考中...",
+     "Third-party": "第三方",
+     "Third-party — use at your own risk": "第三方 — 風險自負",
+diff --git a/web/src/i18n/locales/zh.json b/web/src/i18n/locales/zh.json
+index ffc3432..3f3ea88 100644
+--- a/web/src/i18n/locales/zh.json
++++ b/web/src/i18n/locales/zh.json
+@@ -6318,6 +6318,9 @@
+     "These values come from the source index and are shown for review only. The gateway admits the plugin based on the metadata compiled from its source.": "这些值来自源索引，仅供审查参考。网关的准入判定只依据从源码编译出的真实元数据。",
+     "Thinking Suffix Adapter": "思考后缀适配器",
+     "Thinking to Content": "思维到内容",
++    "Daily Token Limit": "每日 Token 限额",
++    "0 means unlimited": "0 表示不限制",
++    "Maximum billable input + output tokens per channel per day. 0 means unlimited.": "每个渠道每天可计费的输入 + 输出 Token 上限。0 表示不限制。",
+     "Thinking...": "思考中...",
+     "Third-party": "第三方",
+     "Third-party — use at your own risk": "第三方 — 风险自担",
