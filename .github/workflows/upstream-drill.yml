@@ -1,0 +1,66 @@
+name: Upstream Drill
+# 每月把本方 series 重放到最新上游 main 并跑门禁。它**不是**发布门禁：演练失败
+# 是"这一版要人工处理"的信号，所以不刷红，只把结论写进 summary 与产物日志。
+# 注意：schedule 只在仓库默认分支上生效；product 分支还不是默认分支时，
+# 用 workflow_dispatch 手动跑（或把该分支设为默认）。
+on:
+  schedule:
+    - cron: "0 3 5 * *"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 上游 ref（默认 upstream/main）
+        required: false
+        default: upstream/main
+permissions:
+  contents: read
+concurrency:
+  group: upstream-drill
+  cancel-in-progress: true
+
+jobs:
+  drill:
+    runs-on: ubuntu-latest
+    env:
+      UPSTREAM_BASE: v1.0.0-rc.46
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 导出 series 需要完整历史与上游 tag。
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Replay the series onto the newest upstream ref and run the gates
+        id: drill
+        continue-on-error: true
+        run: |
+          # git am 需要 committer 身份，runner 默认没有。
+          git config user.name "Upstream Drill"
+          git config user.email "ci@invalid"
+          status=0
+          ./scripts/upstream-sync.sh drill "${{ inputs.ref || 'upstream/main' }}" \
+            > drill.log 2>&1 || status=$?
+          echo "drill_exit=$status" >> drill.log
+          tail -40 drill.log
+          # 让这一步自己保留失败状态（显示 ⚠），但 job 因为 continue-on-error 仍然绿。
+          exit "$status"
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo "## Upstream drill against the newest main"
+            echo '```'
+            grep -E 'drill_exit=|DRILL (OK|FAILED)|overlap with|Patch failed|conflicted files:' drill.log || true
+            grep -E '^  [a-zA-Z0-9_./-]+$' drill.log | sort -u | head -20 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: drill-log
+          path: drill.log

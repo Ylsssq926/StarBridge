@@ -252,6 +252,12 @@ CI 与 `drill` 的分工：CI 只在**基线 tag** 上重放（那一路必然�
 `drill <更新的上游 ref>` 是本机才做的事——它回答"下一版上游能不能跟、要改哪几处"，CI 不跑那个 ref，
 也不该跑（失败是预期结果，会把门禁刷红）。
 
+另有一个 `.github/workflows/upstream-drill.yml`：每月 5 日 03:00 UTC 把 series 重放到最新
+`upstream/main` 并跑门禁，`continue-on-error` + 把 overlap / `DRILL OK|FAILED` / 冲突文件写进
+step summary 与日志产物。它是**信号不是红绿灯**（失败也整绿，⚠ 在步骤上）。
+两个前提：`schedule` 只在仓库**默认分支**生效（product 分支还不是默认分支时用 `workflow_dispatch` 手动触发，可传 ref）；
+演练结论仍要有人看，别把它当成"跑过了就没事"。
+
 一条只有 CI 演练才暴露的规则：`main.go` 用 `go:embed web/dist`，**重放出的工作树若没有前端产物，`go build ./...` 会直接失败**。`upstream-sync.sh check` 会自动复用或构建 `web/dist`，CI 里由 `frontend` job 的产物补上，手工在新工作树里跑 `go build` 也要先准备它。
 
 端到端门禁（需要 compose 栈 + `node scripts/mock-upstream.cjs`，发布前手工执行）：
