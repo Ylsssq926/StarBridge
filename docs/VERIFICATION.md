@@ -47,6 +47,9 @@
 | 三方合并后应用到 main | 冲突解决，`go build ./...` 通过 |
 | 纯净 main 按序应用 `0001` + `0002` | 应用成功、构建成功、单测通过 |
 | 纯净 tag 应用 rc.46 补丁（真实 tag，非本地分支） | `git worktree add` + `git apply --3way` 全部 clean，构建与单测通过 |
+| **向前升级到最新 main（23 commits 超前）** | 20 个提交逐个 `git am -3` 重放：**只有 `model/channel_constraint.go` 两处冲突** —— ① `channelMatchesFilter` 的 switch 需要同时保留上游新增的 `FilterTaskPluginEndpoint` 分支与我们的 `FilterDailyTokenLimit` 分支；② 一处函数注释文案。其余 19 个提交全部自动合并 |
+| 升级后功能正确性 | `go build ./...` 通过（需先准备 `web/dist`）、relaykit 独立构建通过、common/model/service 定向回归全绿；合并结果保留上游新过滤器、日预算仍走独立求值 |
+| 演练暴露的两个自身缺陷 | ① `apply` 在 `git am` 冲突后仍继续并返回成功——`( … ) || { … }` 这个左侧上下文中 `set -e` 被抑制；已给每个可失败命令加显式 `|| exit 1`，回归验证 `APPLY_EXIT=1` 且不再打印 `created:`/`copied:`。② main 上 `web/package.json` 的 typecheck 入口变成 `bun check -b`，本地 bun 1.3.14 无 `check` 子命令 → 该 ref 上类型门实际不可用；`check` 已把"静默跳过 tsgo 缺失"改成响亮告警 |
 
 ## 4. 日限额与兼容性端到端
 
@@ -275,6 +278,7 @@ rm docker-compose.poc.override.yml
 - 给 `verify-daily-limit.mjs` 加辅助函数时重复声明了 `listChannels`，`node --check` 直接报 SyntaxError；说明脚本必须先过语法检查再跑。
 - MySQL 复跑时把取 key 的命令内联进 `KEY_CMD`，反引号标识符被 `bash -lc` 当成命令替换执行（`key: command not found`）；改为脚本文件传参并写进用法注释。
 - 用 `--default-authentication-plugin` 起 `mysql:8` 直接初始化失败（8.4 已移除该参数）；照官方默认参数重来即可。
+- 三次犯同一个测量错误：用 `cmd | tail -n` 之后读 `$?`，拿到的是 `tail` 的退出码，于是把失败读成了成功（`go build`、`bun run typecheck`、`apply` 各一次）。规则：**判断退出码必须绕开管道**（写文件后再 `echo $?`，或用 `set -o pipefail`）。文档里"绿色"结论若来自带管道的命令，一律重测。
 - 把应用容器留在默认 bridge 网络上按容器 IP 连 MySQL 得到 `connection refused`；换用户自定义网络（compose 的默认行为）后即通。
 
 自审发现的真实缺陷（均已修并留证）：

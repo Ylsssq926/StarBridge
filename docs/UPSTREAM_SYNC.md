@@ -84,6 +84,11 @@ git diff --check
 
 已知冲突热点（按本轮重构后的实际结构）：
 
+> 实测锚点：把当前 20 个提交重放到比 rc.46 超前 23 个提交的 `upstream/main`，只有
+> `model/channel_constraint.go` 冲突两处（`channelMatchesFilter` 的 switch、一个函数注释），
+> 其余 19 个提交自动合并。解决原则：上游新增的过滤器分支原样保留，日预算继续走独立求值。
+> `apply` 现在接受任意 ref（`./scripts/upstream-sync.sh apply upstream/main` → 目录名里的斜杠会被换成连字符）。
+
 - `common/channel_daily_limit.go`：多指标计数（tokens / requests）与 Redis 不可用时的回退
 - `dto/channel_constraints.go`：上游可能新增 `ChannelFilterKind`
 - `model/channel_constraint.go`：**日预算已从 `filterEvalOrder` 解耦**，单独在 `ChannelSatisfiesFilters` 与 `filterCandidateIDs` 开头求值；上游若重排该列表，保持"日预算先于请求过滤器"即可

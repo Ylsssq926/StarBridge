@@ -284,7 +284,10 @@ cmd_check() {
     elif [ -e web/node_modules/.bin/tsgo ]; then
       (cd web && bun run typecheck)
     else
-      echo "==> skip typecheck: tsgo missing (run bun install first)"
+      # Loud, not silent: a missing type-check entry point means the tree has no
+      # type gate right now, which must be visible in upgrade output.
+      echo "WARNING: no typecheck entry point (web/node_modules/.bin/tsgo missing)." >&2
+      echo "         Upstream may have switched the typecheck command; check web/package.json on this ref." >&2
     fi
   )
 }
@@ -321,7 +324,10 @@ cmd_apply() {
     exit 2
   fi
   ensure_remote
-  local target="$WORKTREE_ROOT/new-api-$tag"
+  # Accept any ref: a forward rehearsal often targets upstream/main rather than
+  # a tag, and a slash would produce a nested directory name.
+  local slug="${tag//\//-}"
+  local target="$WORKTREE_ROOT/new-api-$slug"
   if [ -e "$target" ]; then
     if [ "${REPLAY_CLEANUP:-1}" = "1" ] && is_stale_replay_worktree "$target" "$tag"; then
       # --force only clears generated leftovers (web/dist, node_modules); the
@@ -346,13 +352,22 @@ cmd_apply() {
   fi
   (
     cd "$target"
+    # errexit is suppressed inside a subshell that feeds a `||` list, so every
+    # command that can fail has to abort explicitly; otherwise a conflicted replay
+    # would silently continue and report success.
     if [ "${USE_SERIES:-1}" = "1" ] && ls "$ROOT/$SERIES_DIR"/*.patch >/dev/null 2>&1; then
       echo "applying commit series from $SERIES_DIR with git am -3"
-      git am -3 --no-keep-cr "$ROOT/$SERIES_DIR"/*.patch
+      if ! git am -3 --no-keep-cr "$ROOT/$SERIES_DIR"/*.patch; then
+        echo "git am stopped; resolve or run: git -C $target am --abort" >&2
+        exit 1
+      fi
     else
       for patch in $PATCH_FILES; do
         echo "applying $patch"
-        git apply --3way "$ROOT/$patch"
+        if ! git apply --3way "$ROOT/$patch"; then
+          echo "git apply failed for $patch" >&2
+          exit 1
+        fi
       done
     fi
     # Renormalize the working tree: line-ending rules introduced by a later

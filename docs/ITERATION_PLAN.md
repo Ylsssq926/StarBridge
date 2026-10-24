@@ -126,11 +126,13 @@
 任务：
 
 - [ ] 每月检查 new-api release/tag
-- [ ] 用 `scripts/upstream-sync.sh apply <tag>` 重放 patch
-- [ ] 解决已知冲突热点
-- [ ] 跑构建、单测、前端类型检查
-- [ ] 跑 compose 烟测
-- [ ] 导出新基线 patch
+- [x] 向前升级演练：20 个提交重放到超前 rc.46 23 个提交的 `upstream/main`，只有 `model/channel_constraint.go` 冲突两处，其余自动合并，构建与回归全绿（2026-10-24）
+- [ ] 用 `scripts/upstream-sync.sh apply <ref>` 重放 series（tag 或 `upstream/main` 均可）
+- [ ] 解决已知冲突热点（清单见 `docs/UPSTREAM_SYNC.md` §3.3）
+- [ ] 升级前确认上游 typecheck 入口与 CI 的 bun 版本匹配（main 上已变为 `bun check -b`，bun 1.3.14 不支持）
+- [ ] 跑构建、单测、前端类型检查（`main.go` 的 `go:embed web/dist` 需要先准备前端产物）
+- [ ] 跑 compose 烟测与逐类型/三库最小部署实测
+- [ ] `export-series` + `verify-series` 导出并校验新基线序列
 - [ ] 灰度发布 + 回滚预案
 
 验收：
