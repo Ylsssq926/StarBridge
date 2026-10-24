@@ -49,7 +49,12 @@
 | 纯净 tag 应用 rc.46 补丁（真实 tag，非本地分支） | `git worktree add` + `git apply --3way` 全部 clean，构建与单测通过 |
 | **向前升级到最新 main（23 commits 超前）** | 20 个提交逐个 `git am -3` 重放：**只有 `model/channel_constraint.go` 两处冲突** —— ① `channelMatchesFilter` 的 switch 需要同时保留上游新增的 `FilterTaskPluginEndpoint` 分支与我们的 `FilterDailyTokenLimit` 分支；② 一处函数注释文案。其余 19 个提交全部自动合并 |
 | 升级后功能正确性 | `go build ./...` 通过（需先准备 `web/dist`）、relaykit 独立构建通过、common/model/service 定向回归全绿；合并结果保留上游新过滤器、日预算仍走独立求值 |
-| 演练暴露的两个自身缺陷 | ① `apply` 在 `git am` 冲突后仍继续并返回成功——`( … ) || { … }` 这个左侧上下文中 `set -e` 被抑制；已给每个可失败命令加显式 `|| exit 1`，回归验证 `APPLY_EXIT=1` 且不再打印 `created:`/`copied:`。② main 上 `web/package.json` 的 typecheck 入口变成 `bun check -b`，本地 bun 1.3.14 无 `check` 子命令 → 该 ref 上类型门实际不可用；`check` 已把"静默跳过 tsgo 缺失"改成响亮告警 |
+| 演练暴露的两个自身缺陷 | ① `apply` 在 `git am` 冲突后仍继续并返回成功——`( … ) || { … }` 这个左侧上下文中 `set -e` 被抑制；已给每个可失败命令加显式 `|| exit 1`，回归验证 `APPLY_EXIT=1` 且不再打印 `created:`/`copied:`。② main 上 `web/package.json` 的 typecheck 入口变成 `bun check -b`，本地 bun 1.3.14 无 `check` 子命令 → 该 ref 上类型门实际不可用；`check` 已把"静默跳过 tsgo 缺失"改成响亮告警（该告警在下一轮又被收紧成硬门禁，见下面最后一轮） |
+
+| 一键升级演练 `drill` | 成功路径：`drill v1.0.0-rc.46` 退出码 0，一条命令跑完"overlap 预估(0) → 重导 23 个 patch（74 个功能文件，commits == series）→ 自动丢弃上一轮干净的重放树并重建 → `git am -3` 23 个提交全部 Applying → renormalize → `go build` + relaykit + 三组回归 → 重放树内 `bun install`（1187 包 / 163s）→ `tsgo -b` 真跑（`==> typecheck: ran`）→ `DRILL OK`"。失败路径：`drill upstream/main` 退出码 1，把第一个阻塞点原样交回给人 —— `Patch failed at 0001`、冲突文件 `model/channel_constraint.go`（1 处标记块）、已应用 0 个提交，并打印 `am --continue` / `am --abort` + `worktree remove` 的具体命令；按打印步骤回退后 `git worktree list` 只剩主工作树，无残留 |
+| 未知 ref / 未提交改动的拒绝路径 | `drill v9.9.9-does-not-exist`：overlap 打印 `skipped`，随后 fail-closed 覆盖率校验发现 `.github/workflows/product-gates.yml` 有未提交功能改动 → 拒绝导出 series，退出码 1，**不建任何 worktree、无残留目录**（`.github/` 属功能层，不在产品层白名单内，所以 CI 文件的改动也必须先进提交） |
+| 类型门不再"看似通过" | 演练首轮暴露：重放树没有 `web/node_modules`，旧 `check` 打一行"上游可能换了命令"的告警就继续，类型门其实一行没跑。改为缺依赖先 `bun install --frozen-lockfile`（实测 1187 包 / 178.7s）再跑类型门，依赖齐了却找不到类型入口则**判失败**并给出 `SKIP_TYPECHECK=1` 的显式退路 |
+| 重叠面预估（先知道有多大再动手） | `status` 与 `drill` 开头新增一行 overlap：`upstream/main` 与本方 series 自 `v1.0.0-rc.46` 起**双向改动的文件 18 个**（`model/channel_constraint.go`、`dto/channel_constraints.go`、i18n 三个 yaml、`service/text_quota.go`/`task_polling.go`、面板 4 个文件、7 个前端 locale）。同一轮实测证明"overlap ≠ 冲突"：18 个里只有 `channel_constraint.go` 真冲突，其余全部 3-way 自动合并 —— 因此输出明确标注"风险区，不是冲突数" |
 
 ## 4. 日限额与兼容性端到端
 
@@ -271,6 +276,8 @@ rm docker-compose.poc.override.yml
 | `apply` 的陈旧重放树处理 | 五条路径逐条实测：首次创建 ✓；再次 apply 自动删除干净的 detached 重放树并重建 ✓；有未提交跟踪改动时拒绝且**改动完整保留** ✓；检出分支时拒绝 ✓；`REPLAY_CLEANUP=0` 时保持拒绝 ✓ |
 | 冲突热点清单 | `docs/UPSTREAM_SYNC.md` 已按重构后的结构重写（日预算与 `filterEvalOrder` 解耦、双计数落点、面板登记表、`.gitattributes`/CI 文件） |
 | CI 门禁落地 | 新增 `.github/workflows/product-gates.yml`（backend / frontend / sync-integrity）；YAML 解析通过，sync-integrity 的等价命令在本地演练通过（CI_SYNC_JOB_WOULD_PASS）。演练中发现 `go:embed web/dist` 会让没有前端产物的重放工作树编译失败，改为由 frontend job 产出 dist 供 replay 使用 |
+| 每月上游跟进收敛成一条命令 | `drill <ref>` = overlap 预估 + `export-series`（含覆盖率校验）+ `apply` + `check`；`cmd_apply` 里剩余的可失败路径统一从 `exit` 改为 `return`，让它能被上层组合而不炸掉调用方。`DRILL_SKIP_EXPORT=1` 复用现有 series。见 `docs/UPSTREAM_SYNC.md` §3 开头的推荐入口 |
+| 本轮自审修掉的文档失真 | ①"重放告警=上游换了命令"的措辞掩盖了"依赖没装"这个真实原因；②`§13` 末句仍把"生图/按次计费任务的日限额计量"列为未闭环，而该能力已由 `daily_request_limit` 实现并被 §4 用例覆盖 → 改为只留外部凭据两项 |
 
 自审发现的实现过程失误（同样记录，避免"只留成功叙事"）：
 
@@ -289,4 +296,6 @@ rm docker-compose.poc.override.yml
 4. `.gitattributes` 修复在 `git am` 的重放顺序下不追溯生效 → 重放末尾正规化工作区。
 5. `patches/series/` 入库导致永久脏工作区（`[PATCH n/m]` 计数每次导出都变）→ 改为生成物，`apply` 缺失时自动导出。
 
-仍未闭环（外部依赖，非机制问题）：真实 Kiro/Antigravity 账号、真实国内厂商 Key 与出图、生图/按次计费任务的日限额计量（迭代计划 P1，任务 #16）。
+仍未闭环（外部依赖，非机制问题）：真实 Kiro/Antigravity 账号、真实国内厂商 Key 与真实出图。
+生图/按次计费任务的日限额计量已经实现（`daily_request_limit`，提交时计数）并由
+`verify-daily-limit` 的"出图不产生 token 也照样占用预算"用例覆盖（§4），不再算未闭环项。

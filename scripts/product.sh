@@ -26,9 +26,11 @@ usage: ./scripts/product.sh <command>
   down     stop the compose stack
   ps       show compose status
   logs     follow new-api logs
-  status   show upstream sync status
+  status   show upstream sync status (drift + file overlap with upstream)
   check    quick backend/patch checks (reuse web/dist)
   check-full  build frontend + typecheck + backend checks
+  drill <ref>  one-command monthly upstream rehearsal: export series, replay on
+               <ref>, run the gates (non-zero exit = needs human handling)
 EOF
   exit 2
 }
@@ -40,6 +42,7 @@ case "${1:-}" in
   ps) require_env; docker compose --env-file "$COMPOSE_ENV" -f "$COMPOSE_FILE" ps ;;
   logs) require_env; docker compose --env-file "$COMPOSE_ENV" -f "$COMPOSE_FILE" logs -f new-api ;;
   status) ./scripts/upstream-sync.sh status ;;
+  drill) ./scripts/upstream-sync.sh drill "${2:-}" ;;
   check) ./scripts/upstream-sync.sh check ;;
   check-full) ./scripts/upstream-sync.sh check-full ;;
   *) usage ;;

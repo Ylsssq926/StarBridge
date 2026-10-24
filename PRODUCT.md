@@ -36,7 +36,7 @@
 | `Makefile.product` | 可选 make 入口（本机未安装 make 时用 product.sh） |
 | `scripts/product.sh` | 统一入口：image / up / down / ps / logs / status / check |
 | `scripts/build-image.sh` | 构建含私有补丁的成品镜像 |
-| `scripts/upstream-sync.sh` | 上游状态 / 导出 / 重放 / 校验 |
+| `scripts/upstream-sync.sh` | 上游状态 / 导出 / 重放 / 校验 / 一键演练 `drill` |
 | `scripts/mock-upstream.cjs` | 假上游（固定 usage），供端到端脚本使用 |
 | `scripts/verify-daily-limit.mjs` | 日限额 14 项边界检查（缓存路径 / DB 路径 / 无 Redis 均可跑） |
 | `scripts/verify-compat.mjs` | 协议与接线兼容检查（chat / messages / gemini / images / 错误语义） |
@@ -114,7 +114,7 @@ docker compose -f docker-compose.poc.yml up -d
 
 1. **核心不合并旁路代码**：账号池/OAuth 刷新放在 AIClient2API / CLIProxyAPI / Sub2API，通过 58/59/60 渠道接入。
 2. **私有补丁保持小**：两个日预算特性合计 32 个实现文件 `+622/-38`，另有 4 个测试文件 `+307`（`git diff v1.0.0-rc.46..HEAD` 实测）。改的是过滤器 + 结算/提交钩子，不重写选路核心。
-3. **跟上游优先**：每次升级从新 tag 建 worktree，重放 `patches/0001`、`0002`，跑 `scripts/upstream-sync.sh check`。
+3. **跟上游优先**：每月一条 `./scripts/upstream-sync.sh drill <上游 ref>` 完成"overlap 预估 → 重放 `patches/series` → 构建 + 回归 + 类型门"，非 0 退出即说明这一版要人工处理，输出里直接给冲突文件与后续命令。
 4. **国内模型优先**：DeepSeek、Kimi、智谱、通义、MiniMax、火山、百度、腾讯等使用 new-api 原生渠道。
 5. **生图走官方扩展点**：优先用 new-api 内置 Task Plugin（阿里 Wan/Qwen-Image、豆包 Seedream），不修改核心。
 
@@ -142,7 +142,8 @@ docker compose -f docker-compose.poc.yml up -d
 详见 [docs/UPSTREAM_SYNC.md](docs/UPSTREAM_SYNC.md)。核心命令：
 
 ```bash
-./scripts/upstream-sync.sh status
+./scripts/upstream-sync.sh status                      # 落后多少 + overlap 预估（哪些文件双方都改了）
+./scripts/upstream-sync.sh drill upstream/main         # 一键演练：导出 series → 重放 → 构建/回归/类型门
 ./scripts/upstream-sync.sh export-series v1.0.0-rc.46   # 分支提交 → patches/series + fail-closed 校验
 ./scripts/upstream-sync.sh apply v1.0.0-rc.47           # 新 tag 上 git am -3 重放 series
 ./scripts/upstream-sync.sh check ../new-api-v1.0.0-rc.47

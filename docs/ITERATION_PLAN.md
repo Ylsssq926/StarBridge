@@ -125,12 +125,12 @@
 
 任务：
 
-- [ ] 每月检查 new-api release/tag
+- [x] 每月检查 new-api release/tag：收敛成一条 `./scripts/upstream-sync.sh drill upstream/main`，输出 overlap 预估 + 重放结果 + 门禁结果，非 0 即代表要人工处理（2026-10-25）
+- [x] 用 `scripts/upstream-sync.sh apply <ref>` 重放 series（tag 或 `upstream/main` 均可），两条路径都实测过（2026-10-25）
 - [x] 向前升级演练：20 个提交重放到超前 rc.46 23 个提交的 `upstream/main`，只有 `model/channel_constraint.go` 冲突两处，其余自动合并，构建与回归全绿（2026-10-24）
-- [ ] 用 `scripts/upstream-sync.sh apply <ref>` 重放 series（tag 或 `upstream/main` 均可）
 - [ ] 解决已知冲突热点（清单见 `docs/UPSTREAM_SYNC.md` §3.3）
 - [ ] 升级前确认上游 typecheck 入口与 CI 的 bun 版本匹配（main 上已变为 `bun check -b`，bun 1.3.14 不支持）
-- [ ] 跑构建、单测、前端类型检查（`main.go` 的 `go:embed web/dist` 需要先准备前端产物）
+- [x] 跑构建、单测、前端类型检查（`drill` 的 `check` 段现在会在重放树里先装依赖再跑 `tsgo -b`，类型入口缺失判失败而不是告警；`main.go` 的 `go:embed web/dist` 由脚本自动复用或构建）（2026-10-25）
 - [ ] 跑 compose 烟测与逐类型/三库最小部署实测
 - [ ] `export-series` + `verify-series` 导出并校验新基线序列
 - [ ] 灰度发布 + 回滚预案

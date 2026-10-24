@@ -132,10 +132,12 @@ curl http://<host>:3800/v1/chat/completions \
 ./scripts/product.sh logs        # 跟踪 new-api 日志
 ./scripts/product.sh check       # 后端构建 + 定向回归
 ./scripts/product.sh check-full  # 再加前端构建与类型检查
-./scripts/product.sh status      # 与上游 tag 的落后程度
-node scripts/verify-daily-limit.mjs     # 日限额 10 项边界（需要 scripts/mock-upstream.cjs）
-node scripts/verify-compat.mjs          # 协议/接线 7 项
-node scripts/verify-channel-types.mjs   # 17 种渠道类型的面板适配 + 限额生效
+./scripts/product.sh status      # 与上游的落后程度 + 双向改动文件重叠面
+./scripts/product.sh drill upstream/main   # 每月一次：重放 series + 构建/回归/类型门（非 0 就要人工处理）
+# 端到端门禁：需要 compose 栈在跑，外加 node scripts/mock-upstream.cjs
+node scripts/verify-daily-limit.mjs     # 日限额边界端到端（含无 Redis、出图不计 token 等形态）
+node scripts/verify-compat.mjs          # 协议/接线
+node scripts/verify-channel-types.mjs   # 逐渠道类型的面板适配 + 限额生效
 
 # 最小部署形态实测（/setup 首启 + 两个日限额，无 Redis、无内存缓存）
 # SQLite（默认，直接读库文件取明文 key）

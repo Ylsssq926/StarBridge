@@ -24,6 +24,33 @@
 
 ## 3. 标准升级流程
 
+> **推荐入口：一条命令的演练。** `./scripts/upstream-sync.sh drill <ref>` 会把下面 3.2/3.4/3.5 的
+> 机械步骤串起来：先从 `UPSTREAM_BASE..HEAD` 重新导出 series（顺带跑覆盖率校验），
+> 再在 `../new-api-<ref>` 重放，最后跑门禁（build + 单测 + 前端 typecheck）。
+> 退出码非 0 就是"这个上游版本不能直接跟"，并且会把**冲突文件清单**和
+> `am --continue` / `am --abort` 的后续命令打出来，不需要人再去猜现场。
+>
+> ```bash
+> ./scripts/upstream-sync.sh drill upstream/main      # 向前演练（不合并，只看能不能跟上）
+> ./scripts/upstream-sync.sh drill v1.0.0-rc.46       # 基线自证（重放 + 门禁必须全绿）
+> DRILL_SKIP_EXPORT=1 ./scripts/upstream-sync.sh drill <ref>   # 复用现有 series，不重新导出
+> ```
+>
+> 它会改写生成物 `patches/series/`（已被 gitignore）并新建 worktree，**不会**动 product 分支；
+> 端到端门禁（compose + 三个 `verify-*.mjs`）仍要按 3.5 和 `docs/VERIFICATION.md` 手工跑一次。
+>
+> `check` 这一段现在会把前端类型门当成真门禁：重放出来的 worktree 没有 `web/node_modules`，
+> 脚本会先 `bun install --frozen-lockfile` 再跑 typecheck；若依赖装好了却找不到类型入口
+> （上游换了命令），判定为**失败**而不是打一行警告。只想量冲突面、不关心类型门时显式跳过：
+>
+> ```bash
+> SKIP_TYPECHECK=1 ./scripts/upstream-sync.sh drill upstream/main
+> ```
+>
+> `status` 和 `drill` 都会先打一行 **overlap**：本方 series 改过的文件 ∩ 上游自基线以来改过的文件。
+> 它是"先看一眼这个月有多大"的粗筛，**不是冲突数**——实测 `upstream/main` 有 18 个重叠文件，
+> 真冲突只有 `model/channel_constraint.go` 一个，其余全部三方自动合并。overlap 为空则重放必然干净。
+
 ### 3.1 查看状态
 
 ```bash
@@ -125,8 +152,8 @@ git diff --check
 - relaykit 独立构建
 - 日限额单测
 - 任务计费回归
-- 前端 `bun run typecheck`（仅在 `web/node_modules/.bin/tsgo` 存在时；缺失会跳过）
-- 可用 `SKIP_TYPECHECK=1` 强制跳过
+- 前端 `bun run typecheck`：worktree 里没有 `web/node_modules` 时先 `bun install --frozen-lockfile` 再跑（实测 1187 包 / 178s）；依赖齐了却找不到类型入口 → **判失败**并提示读 `web/package.json`，不再"缺失即跳过"
+- 可用 `SKIP_TYPECHECK=1` 强制跳过（只量冲突面时用），跳过时会打印 `typecheck: skipped`
 
 `check-full` 包含：
 
@@ -191,6 +218,7 @@ series 覆盖的文件集合（fail-closed：任何非产品层、非构建产�
 
 每月：
 
+- `./scripts/upstream-sync.sh drill upstream/main`：上游可跟性演练（冲突面 + 构建 + 回归 + 类型门），非 0 退出即代表"这一版要人工处理"，输出里直接给出冲突文件清单
 - Sub2API / CLIProxyAPI / AIClient2API release
 - Kiro / Antigravity 协议变化
 - 国内厂商新模型/新端点/新 Coding Plan
@@ -215,7 +243,14 @@ docker compose -f docker-compose.poc.yml config --quiet
 
 - `backend`：主模块 + relaykit 构建，日限额 / 选路 / 任务计费回归
 - `frontend`：`bun install --frozen-lockfile` + `typecheck` + 渠道单测，并保留 `web/dist` 产物
-- `sync-integrity`：`status` → `export-series` → `verify-series` → 把 series 重放到基线 tag 的工作树并在其中构建与跑测试 → 用示例 env 校验 compose
+- `sync-integrity`：`status`（含 overlap）→ `export-series` → `verify-series` → 把 series 重放到基线 tag 的工作树 → 在该工作树里调用**同一个** `upstream-sync.sh check`（build + relaykit + 三组回归 + 类型门）→ 用示例 env 校验 compose
+
+  这里刻意让 CI 调脚本、而不是在 YAML 里重抄一遍 `go build`/`go test`：两边的门禁定义只有一份，
+  本地 `drill` 绿什么，CI 就绿什么。重放树需要 `bun`（`check` 会装依赖跑类型门），所以 job 里显式 `setup-bun`。
+
+CI 与 `drill` 的分工：CI 只在**基线 tag** 上重放（那一路必然干净，验证的是"补丁与分支一致"）；
+`drill <更新的上游 ref>` 是本机才做的事——它回答"下一版上游能不能跟、要改哪几处"，CI 不跑那个 ref，
+也不该跑（失败是预期结果，会把门禁刷红）。
 
 一条只有 CI 演练才暴露的规则：`main.go` 用 `go:embed web/dist`，**重放出的工作树若没有前端产物，`go build ./...` 会直接失败**。`upstream-sync.sh check` 会自动复用或构建 `web/dist`，CI 里由 `frontend` job 的产物补上，手工在新工作树里跑 `go build` 也要先准备它。
 

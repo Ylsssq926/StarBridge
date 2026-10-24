@@ -25,6 +25,34 @@ ensure_remote() {
     --tags --prune
 }
 
+# How big is this month, before doing any work: diff arithmetic between the
+# files our series changes and the files <ref> changed since the series base.
+# `git am` halts at the first conflict, so without this the operator only learns
+# the size of the job one blocked patch at a time.
+report_overlap() {
+  local ref="${1:-}"
+  if [ -z "$ref" ]; then
+    return 0
+  fi
+  if ! git rev-parse --verify --quiet "$UPSTREAM_BASE" >/dev/null \
+     || ! git rev-parse --verify --quiet "$ref" >/dev/null; then
+    echo "overlap: skipped ($ref or $UPSTREAM_BASE not available locally)"
+    return 0
+  fi
+  local ours theirs overlap count
+  ours="$(series_change_files "$UPSTREAM_BASE" | sort -u)"
+  theirs="$(git diff --name-only "$UPSTREAM_BASE".."$ref" | sort -u)"
+  overlap="$(comm -12 <(printf '%s\n' "$ours") <(printf '%s\n' "$theirs") | grep -v '^$' || true)"
+  count="$(printf '%s\n' "$overlap" | grep -c . || true)"
+  echo "overlap with $ref: $count file(s) changed by both sides since $UPSTREAM_BASE"
+  echo "  (risk area, not a conflict count: most of these 3-way-merge cleanly)"
+  if [ -n "$overlap" ]; then
+    printf '%s\n' "$overlap" | sed 's/^/  /'
+  else
+    echo "  (empty: the series is expected to replay without conflicts)"
+  fi
+}
+
 cmd_status() {
   ensure_remote
   local upstream_ref="$UPSTREAM_REMOTE/$UPSTREAM_BRANCH"
@@ -33,6 +61,7 @@ cmd_status() {
     echo "Upstream: $upstream_ref $(git rev-parse --short "$upstream_ref")"
     echo "Behind upstream: $(git rev-list --count "HEAD..$upstream_ref" 2>/dev/null || echo "n/a") commits"
     echo "Custom commits: $(git rev-list --count "$upstream_ref..HEAD" 2>/dev/null || echo "n/a")"
+    report_overlap "$upstream_ref"
   else
     echo "Upstream: $upstream_ref (not fetched)"
   fi
@@ -280,14 +309,27 @@ cmd_check() {
     go test ./model -run 'Daily|FilterCandidate|TaskPlugin' -count=1
     go test ./service -run 'TestSettle_|TestTaskBilling|TestLogTaskConsumption|TestRecalculate' -count=1
     if [ "${SKIP_TYPECHECK:-0}" = "1" ]; then
-      echo "==> skip typecheck (SKIP_TYPECHECK=1)"
-    elif [ -e web/node_modules/.bin/tsgo ]; then
+      echo "==> typecheck: skipped (SKIP_TYPECHECK=1)"
+      exit 0
+    fi
+    if [ ! -d web/node_modules ]; then
+      # A replayed worktree has no installed dependencies. Without this the type
+      # gate quietly never runs, and the operator reads a false "entry point
+      # changed" warning instead of a real result.
+      echo "==> typecheck: installing web dependencies (frozen lockfile)"
+      (cd web && bun install --frozen-lockfile)
+    fi
+    if [ -e web/node_modules/.bin/tsgo ]; then
       (cd web && bun run typecheck)
+      echo "==> typecheck: ran"
     else
-      # Loud, not silent: a missing type-check entry point means the tree has no
-      # type gate right now, which must be visible in upgrade output.
-      echo "WARNING: no typecheck entry point (web/node_modules/.bin/tsgo missing)." >&2
-      echo "         Upstream may have switched the typecheck command; check web/package.json on this ref." >&2
+      # Hard failure, not a note: "the type gate did not run" must not be
+      # mistaken for "the type gate passed".
+      echo "ERROR: dependencies are installed but web/node_modules/.bin/tsgo is missing." >&2
+      echo "       Upstream probably changed the typecheck entry point; read web/package.json" >&2
+      echo "       on this ref and update cmd_check. Deliberately skipping it:" >&2
+      echo "       SKIP_TYPECHECK=1 $0 check $dir" >&2
+      exit 1
     fi
   )
 }
@@ -335,20 +377,24 @@ cmd_apply() {
       echo "==> dropping stale replay worktree: $target"
       git worktree remove --force "$target" || {
         echo "failed to remove stale replay worktree: $target" >&2
-        exit 1
+        return 1
       }
       git worktree prune
     else
       echo "target exists but is not a clean detached replay of $tag: $target" >&2
       echo "  inspect it yourself; REPLAY_CLEANUP=0 keeps this refusal behaviour explicit" >&2
-      exit 1
+      return 1
     fi
   fi
-  git worktree add "$target" "$tag"
+  git worktree add "$target" "$tag" || {
+    echo "cannot create a worktree from $tag" >&2
+    echo "  is the ref known locally? try: git fetch $UPSTREAM_REMOTE --tags --prune" >&2
+    return 1
+  }
   # patches/series is generated, not tracked: build it from the branch if absent.
   if [ "${USE_SERIES:-1}" = "1" ] && ! ls "$ROOT/$SERIES_DIR"/*.patch >/dev/null 2>&1; then
     echo "==> no series found, exporting from $UPSTREAM_BASE"
-    (cd "$ROOT" && cmd_export_series "$UPSTREAM_BASE") || exit 1
+    (cd "$ROOT" && cmd_export_series "$UPSTREAM_BASE") || return 1
   fi
   (
     cd "$target"
@@ -383,7 +429,7 @@ cmd_apply() {
   ) || {
     echo "replay failed; resolve in: $target" >&2
     echo "  series mode: git am --abort to back out, or USE_SERIES=0 for file patches" >&2
-    exit 1
+    return 1
   }
   echo "created: $target"
   # A commit series already carries the product layer; only fill it in when the
@@ -393,6 +439,75 @@ cmd_apply() {
     cmd_tooling "$target"
   fi
   echo "next: $0 check $target"
+}
+
+# A failed replay is only useful if it says what broke. Print the unmerged paths,
+# how far the series got, and the exact commands to continue or back out.
+report_replay_state() {
+  local target="$1" tag="$2"
+  if [ ! -d "$target" ]; then
+    echo "  no worktree at $target: the run refused before replaying" >&2
+    return 0
+  fi
+  local conflicted applied
+  conflicted="$(git -C "$target" diff --name-only --diff-filter=U 2>/dev/null || true)"
+  applied="$(git -C "$target" rev-list --count "$tag"..HEAD 2>/dev/null || echo unknown)"
+  echo "  worktree kept for inspection: $target ($applied commit(s) of the series applied)" >&2
+  if [ -n "$conflicted" ]; then
+    echo "conflicted files:" >&2
+    while IFS= read -r path; do
+      [ -n "$path" ] || continue
+      echo "  $path" >&2
+    done <<< "$conflicted"
+    echo "resolve, then continue the replay:" >&2
+    echo "  git -C $target add <files>" >&2
+    echo "  git -C $target am --continue" >&2
+  else
+    echo "  no unmerged paths: git stopped before applying, check the output above" >&2
+    echo "  inspect with: git -C $target status --short --untracked-files=no" >&2
+  fi
+  echo "back out and discard the rehearsal:" >&2
+  echo "  git -C $target am --abort" >&2
+  echo "  git worktree remove --force $target && git worktree prune" >&2
+}
+
+# Monthly follow-up, one command: refresh the series from the branch tip, replay
+# it onto <ref>, run the gates. Nothing here touches the product branch, and the
+# exit code is only zero when a real upgrade would build and pass the gate suite.
+cmd_drill() {
+  local tag="${1:-}"
+  if [ -z "$tag" ]; then
+    echo "usage: $0 drill <ref>      e.g. drill $UPSTREAM_REMOTE/$UPSTREAM_BRANCH or drill <new-tag>" >&2
+    return 2
+  fi
+  local slug="${tag//\//-}"
+  local target="$WORKTREE_ROOT/new-api-$slug"
+
+  # Fetch first: a tag published after the last fetch would otherwise make the
+  # overlap line print "skipped", hiding exactly the warning we want up front.
+  ensure_remote || return 1
+  report_overlap "$tag"
+  if [ "${DRILL_SKIP_EXPORT:-0}" = "1" ]; then
+    echo "==> drill against $tag (reusing existing $SERIES_DIR)"
+  else
+    echo "==> drill against $tag (series refreshed from $UPSTREAM_BASE..HEAD)"
+    cmd_export_series "$UPSTREAM_BASE" || return 1
+  fi
+  if ! cmd_apply "$tag"; then
+    echo "DRILL FAILED: replay of $tag did not complete" >&2
+    report_replay_state "$target" "$tag"
+    return 1
+  fi
+  echo "==> replay of $tag clean, running gates"
+  if ! cmd_check "$target"; then
+    echo "DRILL FAILED: $tag applied cleanly but the gates failed" >&2
+    echo "  the product layer needs adapting, not conflict resolution." >&2
+    echo "  work in: $target" >&2
+    return 1
+  fi
+  echo "DRILL OK: $tag + the current series builds and passes the gate suite"
+  echo "next: review $target, then discard it with:"
+  echo "  git worktree remove --force $target && git worktree prune"
 }
 
 case "${1:-status}" in
@@ -405,9 +520,12 @@ case "${1:-status}" in
   check) cmd_check "${2:-$ROOT}" ;;
   check-full) cmd_check_full "${2:-$ROOT}" ;;
   apply) cmd_apply "${2:-}" ;;
+  drill) cmd_drill "${2:-}" ;;
   *)
-    echo "usage: $0 {status|export|export-series [base]|verify-series [base]|verify-patch [file]|tooling <dir>|check [dir]|check-full [dir]|apply <tag>}" >&2
+    echo "usage: $0 {status|export|export-series [base]|verify-series [base]|verify-patch [file]|tooling <dir>|check [dir]|check-full [dir]|apply <tag>|drill <ref>}" >&2
     echo "  apply replays patches/series with git am -3 by default (base: UPSTREAM_BASE)" >&2
+    echo "  drill <ref> = export-series + apply + check in one run; use it for the monthly follow-up" >&2
+    echo "  DRILL_SKIP_EXPORT=1 makes drill reuse the existing patches/series" >&2
     echo "  USE_SERIES=0 falls back to PATCH_FILES; PATCH_FILES overrides the file-patch list" >&2
     echo "  COPY_TOOLING=0 skips copying the product layer into a new worktree" >&2
     exit 2

@@ -3,7 +3,7 @@ IMAGE ?= new-api-daily-limit:local
 COMPOSE_ENV ?= .env
 COMPOSE_FILE ?= docker-compose.poc.yml
 
-.PHONY: image up down logs ps sync-status sync-check sync-check-full
+.PHONY: image up down logs ps sync-status sync-check sync-check-full drill
 
 image:
 	./scripts/build-image.sh
@@ -28,3 +28,8 @@ sync-check:
 
 sync-check-full:
 	./scripts/upstream-sync.sh check-full
+
+# Monthly upstream follow-up: make drill REF=upstream/main
+drill:
+	@if [ -z "$(REF)" ]; then echo "usage: make drill REF=<upstream ref>" >&2; exit 2; fi
+	./scripts/upstream-sync.sh drill $(REF)

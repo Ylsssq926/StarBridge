@@ -88,6 +88,10 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - uses: oven-sh/setup-bun@v2
+        with:
+          # `check` 会在重放工作树里装依赖并跑类型门，runner 默认没有 bun。
+          bun-version: latest
       - name: Show drift against upstream
         run: ./scripts/upstream-sync.sh status
       - name: Export the commit series and verify coverage
@@ -111,10 +115,9 @@ jobs:
           worktree="../new-api-$UPSTREAM_BASE"
           mkdir -p "$worktree/web/dist"
           cp -R web-dist/. "$worktree/web/dist/"
-          cd "$worktree"
-          go build ./...
-          go test ./common -run Daily -count=1
-          go test ./model -run 'Daily|FilterCandidate' -count=1
+          # 复用同一个脚本而不是在 CI 里重抄一遍命令：本地 `drill` 跑绿什么，
+          # 这里就绿什么（否则两边的门禁会各自漂移）。
+          ./scripts/upstream-sync.sh check "$worktree"
       - name: Validate compose configuration
         run: |
           cd "$GITHUB_WORKSPACE"
