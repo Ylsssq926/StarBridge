@@ -73,8 +73,8 @@ record('token created', keyRes.json.success === true, keyRes.json.message || '')
 // The panel API only ever returns masked keys, so the plaintext key is read back
 // from the throwaway PoC database. Never do this against a real deployment.
 const { execFileSync } = await import('node:child_process');
-relayKey = execFileSync('docker', ['exec', 'new-api-poc-postgres', 'psql', '-U', 'newapi', '-d', 'new-api', '-At',
-  '-c', `select key from tokens where name = '${TOKEN_NAME}' limit 1`], { encoding: 'utf8' }).trim();
+const psql = (sql) => execFileSync('docker', ['exec', 'new-api-poc-postgres', 'psql', '-U', 'newapi', '-d', 'new-api', '-At', '-c', sql], { encoding: 'utf8' }).trim();
+relayKey = psql(`select key from tokens where name = '${TOKEN_NAME}' limit 1`);
 record('plaintext relay key read from the PoC database', relayKey.length > 20, `len=${relayKey.length}`);
 
 const modelName = `obs-m-${Date.now()}`;
@@ -176,6 +176,10 @@ for (const stray of freshRows.filter((c) => (c.models || '').includes(modelName)
 // The PoC enforces one active admin session (a second login returns
 // AUTH_SESSION_LIMIT/Conflict), so a run that does not log out blocks the next
 // one. Best-effort: ignore failures, the checks above already happened.
+// The token this run created would otherwise accumulate in the PoC database on
+// every run (a previous version of this harness leaked 32 of them). Same
+// throwaway-stack caveat as the key read above.
+psql(`delete from tokens where name = '${TOKEN_NAME}'`);
 try {
   await api('/api/user/logout', { method: 'POST' });
 } catch {
