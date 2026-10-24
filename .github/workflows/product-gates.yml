@@ -1,0 +1,94 @@
+name: Product Gates
+
+# 私有成品层的门禁，独立于上游 ci.yml：新增文件不扩大合并冲突面，
+# 上游 workflow 变动时这里不受影响。
+
+on:
+  pull_request:
+  push:
+    branches:
+      - product/daily-limit
+  workflow_dispatch:
+  schedule:
+    # 每周一 03:00 UTC：即使没人提 PR，也检查与上游的偏移是否可重放。
+    - cron: '0 3 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: product-gates-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build main module
+        run: go build ./...
+      - name: Build relaykit module
+        run: cd relaykit && GOWORK=off go build ./...
+      - name: Daily limit unit tests
+        run: go test ./common -run Daily -count=1
+      - name: Channel selection unit tests
+        run: go test ./model -run 'Daily|FilterCandidate|TaskPlugin' -count=1
+      - name: Task billing regression
+        run: go test ./service -run 'TestSettle_|TestTaskBilling|TestLogTaskConsumption|TestRecalculate' -count=1
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install
+        working-directory: web
+        run: bun install --frozen-lockfile
+      - name: Typecheck
+        working-directory: web
+        run: bun run typecheck
+      - name: Channel feature tests
+        working-directory: web
+        run: bunx vitest run src/features/channels
+
+  sync-integrity:
+    runs-on: ubuntu-latest
+    env:
+      UPSTREAM_BASE: v1.0.0-rc.46
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 重放校验需要完整历史与上游 tag。
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Show drift against upstream
+        run: ./scripts/upstream-sync.sh status
+      - name: Export the commit series and verify coverage
+        run: |
+          ./scripts/upstream-sync.sh export-series "$UPSTREAM_BASE"
+          ./scripts/upstream-sync.sh verify-series "$UPSTREAM_BASE"
+      - name: Replay the series onto its base tag and build it there
+        run: |
+          # git am needs a committer identity; the runner has none by default.
+          git config user.name "Product Gates CI"
+          git config user.email "ci@invalid"
+          ./scripts/upstream-sync.sh apply "$UPSTREAM_BASE"
+          worktree="../new-api-$UPSTREAM_BASE"
+          cd "$worktree"
+          go build ./...
+          go test ./common -run Daily -count=1
+          go test ./model -run 'Daily|FilterCandidate' -count=1
+      - name: Validate compose configuration
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          cp .env.product.example .env
+          docker compose -f docker-compose.poc.yml config --quiet
