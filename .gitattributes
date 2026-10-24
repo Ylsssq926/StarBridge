@@ -22,6 +22,15 @@
 # Shell scripts
 *.sh text eol=lf
 
+# Executed or applied verbatim: a CRLF checkout breaks node ESM scripts and
+# makes git apply see bogus trailing whitespace.
+*.mjs text eol=lf
+*.cjs text eol=lf
+*.patch text eol=lf
+Dockerfile* text eol=lf
+Makefile* text eol=lf
+*.example text eol=lf
+
 # Binary files
 *.png binary
 *.jpg binary
