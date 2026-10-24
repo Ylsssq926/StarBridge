@@ -8,10 +8,12 @@ UPSTREAM_REMOTE="${UPSTREAM_REMOTE:-upstream}"
 UPSTREAM_BRANCH="${UPSTREAM_BRANCH:-main}"
 UPSTREAM_URL="${UPSTREAM_URL:-https://github.com/QuantumNous/new-api.git}"
 PATCH_DIR="${PATCH_DIR:-patches}"
-PATCH_FILE="${PATCH_FILE:-$PATCH_DIR/channel-daily-limit.patch}"
-# main-based series by default. For rc.46 use:
-#   PATCH_FILES="patches/channel-daily-limit.patch" ./scripts/upstream-sync.sh apply v1.0.0-rc.46
-PATCH_FILES="${PATCH_FILES:-$PATCH_DIR/0001-daily-limit-core.patch $PATCH_DIR/0002-daily-limit-web.patch $PATCH_DIR/0003-console-block-adaptation.patch}"
+LEGACY_DIR="${LEGACY_DIR:-patches/legacy}"
+PATCH_FILE="${PATCH_FILE:-$LEGACY_DIR/channel-daily-limit.working-tree.patch}"
+# The branch/commit series (patches/series) is the primary mechanism; these
+# file patches are the pre-commit baseline kept for reference and for
+# USE_SERIES=0 replays.
+PATCH_FILES="${PATCH_FILES:-$LEGACY_DIR/0001-daily-limit-core.patch $LEGACY_DIR/0002-daily-limit-web.patch $LEGACY_DIR/0003-console-block-adaptation.patch}"
 WORKTREE_ROOT="${WORKTREE_ROOT:-$(dirname "$ROOT")}"
 
 ensure_remote() {
@@ -329,7 +331,9 @@ cmd_apply() {
     exit 1
   }
   echo "created: $target"
-  if [ "${COPY_TOOLING:-1}" = "1" ]; then
+  # A commit series already carries the product layer; only fill it in when the
+  # replay used file patches (or the target lacks the layer).
+  if [ "${COPY_TOOLING:-1}" = "1" ] && [ ! -e "$target/scripts/upstream-sync.sh" ]; then
     echo "==> copying product layer"
     cmd_tooling "$target"
   fi
