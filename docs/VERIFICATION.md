@@ -24,8 +24,9 @@
 | 选路/任务单测 | `go test ./model -run 'Daily|FilterCandidate|TaskPlugin'` | 通过 |
 | 任务计费回归 | `go test ./service -run 'TestSettle_|TestTaskBilling|TestLogTaskConsumption|TestRecalculate'` | 通过 |
 | 前端类型检查 | `cd web && bun run typecheck` | 通过 |
-| 前端 lint | `bunx oxlint ...` | 0 warning / 0 error |
-| 渠道组件测试 | `bunx vitest run ...` | 95 passed |
+| 前端 lint（整树） | `bun run lint` → 66 warnings / 158 errors；**纯净 rc.46 基线用同一 oxlint 1.74.0 跑出完全相同的 66/158**，即上游既存状态，本项目未新增任何一条 |
+| 前端 lint（本方改动文件） | 5 个文件（`channel-configuration.ts` / `channel-form.ts` / `types.ts` / `channel-mutate-drawer.tsx` / 其测试）→ **0 warning / 0 error**；该检查已作为 CI 步骤固定下来 |
+| 渠道组件测试 | `bunx vitest run src/features/channels` | 358 passed（29 个文件） |
 | 完整同步校验 | `./scripts/upstream-sync.sh check-full` | 前端构建 + typecheck + 后端回归通过 |
 | 全量后端测试 | `go test ./common ./model ./service ./dto` | 仅 2 个既存失败（见下），其余通过 |
 | relaykit 模块测试 | `cd relaykit && GOWORK=off go test ./...` | 9 个包全部通过 |
