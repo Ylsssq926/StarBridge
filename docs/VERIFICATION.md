@@ -334,3 +334,5 @@ SQLite 与 MySQL 的等价实测在 §4 的 `verify-minimal-deployment.mjs`（�
 | "2 而不是 1"追到根因 | 不是重复计数：默认 `RetryTimes=0` 时一个被挡的请求会做 **2 次选路尝试**（同一请求在两行相同的 distributor `No available channel ... (distributor)` 错误日志里可见），每次尝试发现该渠道超额都计 1 次。字段因此改名为 `reject_selection_attempts_today`（单位是选路尝试），接口一并返回 `retry_times` 供参考。我最初推断倍率是 `retry_times+1`，harness 的断言把它证伪了（预测 1、实测 2），所以最终改成"钉住实测值 2、变了就红"而不是写公式——不要拿未验证的换算骗运维 |
 | 密钥卫生 | 聚合分支走 `GetAllChannels(0, -1, selectAll=false, ...)`，即 GORM `Omit("key")` 路径，密钥连内存都不加载；`Limit(-1)` 表示不分页而不是写死魔法数 |
 | 版本纪律 | 新增接口属内容变化 → `PRODUCT_VERSION` 0.2.0 → **0.3.0**，镜像重打为 `new-api-daily-limit:0.3.0` 与别名 `starbridge-gateway:0.3.0`（同一 tag 不覆盖内容）；`.gitattributes` 补 `PRODUCT_VERSION text eol=lf`，避免 Windows 检出 CRLF 把版本号读成带 `\r` 的 tag |
+| §9 结算竞态：从推断升级为复现 | 加结算等待后连跑两次均 **16/16**；加等待之前，第二次连跑实测出现"第二个请求 status=200、requests_used=2、rejects=0"——文本 relay 用量在响应后结算，紧接的下一次请求可抢在结算前通过选路。§9 写的边界现在有复现输出，不只是文字 |
+| harness 会自我阻塞（会话限制） | PoC 限制单会话：上一次运行不 logout，下一次登录直接 `AUTH_SESSION_LIMIT / Conflict`（实测撞到过）。harness 末尾补 best-effort 退出后，连跑两次均可登录 |
