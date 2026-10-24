@@ -1,4 +1,11 @@
-# New API 国内模型网关 · 成品说明（v0.1.0）
+# 星桥 StarBridge · New API 国内模型网关（成品说明 v0.1.2）
+
+## 名称与来源
+
+- **星桥 / StarBridge** 是本成品（发行版）的名称，只作用于发行物命名：镜像别名 `starbridge-gateway:<version>`。
+- 代码主体的上游身份保持不变：模块路径 `github.com/QuantumNous/new-api`、`LICENSE`（AGPL-3.0）、`NOTICE` 与 `THIRD-PARTY-LICENSES.md` 均随镜像分发。
+- 官方上游镜像仍写作 `calciumion/new-api`，PoC 可直接用它替换 `NEW_API_IMAGE`（此时不含本项目的私有补丁）。
+- 旁路能力（Kiro / Antigravity / Codex / Grok 账号接入）由 AIClient2API、CLIProxyAPI、Sub2API **各自独立部署**后经渠道类型 58/59/60 接入；本项目不包含它们的源码，因此不改动本项目的许可证。
 
 ## 定位
 
@@ -34,12 +41,10 @@
 | `scripts/verify-daily-limit.mjs` | 日限额 10 项边界检查（缓存路径 / DB 路径 / 无 Redis 均可跑） |
 | `scripts/verify-compat.mjs` | 协议与接线兼容检查（chat / messages / gemini / images / 错误语义） |
 | `scripts/verify-channel-types.mjs` | 逐上游类型的面板适配与限额生效检查 |
-| `patches/0001-daily-limit-core.patch` | 日限额后端补丁 |
-| `patches/0002-daily-limit-web.patch` | 日限额前端补丁 |
-| `patches/channel-daily-limit-main.patch` | 基于最新 main 的合并补丁 |
-| `patches/channel-daily-limit.patch` | 基于 rc.46 的合并补丁 |
+| `patches/series/` | **主机制**：由分支提交生成的 patch series（`git am -3` 重放） |
+| `patches/legacy/` | pre-commit 基线的手工 file patch，仅供 `USE_SERIES=0` 回退与历史对照 |
 
-已构建镜像：`new-api-daily-limit:local` 与版本 tag `new-api-daily-limit:0.1.0`（约 312MB）。
+已构建镜像：`new-api-daily-limit:local` / `:0.1.2`，别名 `starbridge-gateway:local` / `:0.1.2`（约 312MB，含 `LICENSE`、`NOTICE`、`THIRD-PARTY-LICENSES.md`）。版本 tag 不可变：内容变化必须升 `PRODUCT_VERSION`。
 
 ## 快速启动
 
@@ -137,7 +142,8 @@ docker compose -f docker-compose.poc.yml up -d
 
 ```bash
 ./scripts/upstream-sync.sh status
-./scripts/upstream-sync.sh apply v1.0.0-rc.47
+./scripts/upstream-sync.sh export-series v1.0.0-rc.46   # 分支提交 → patches/series + fail-closed 校验
+./scripts/upstream-sync.sh apply v1.0.0-rc.47           # 新 tag 上 git am -3 重放 series
 ./scripts/upstream-sync.sh check ../new-api-v1.0.0-rc.47
 # 发布前完整校验（worktree 内构建前端 + typecheck + 后端回归）
 ./scripts/upstream-sync.sh check-full ../new-api-v1.0.0-rc.47

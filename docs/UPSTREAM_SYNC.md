@@ -3,22 +3,24 @@
 ## 1. 原则
 
 - **主项目只跟上游**：`QuantumNous/new-api`。
-- **私有改动只以 patch 存在**：当前为 `patches/0001` + `0002` + `0003`。
+- **私有改动以分支提交存在**：本地分支 `product/daily-limit`，`patches/series/` 是它的 `git format-patch` 导出。
+- **重放用 `git am -3`**：保留每个改动的作者、说明与边界，冲突可 `git am --abort` 整体回退。
+- **`patches/legacy/` 是 pre-commit 基线**：仅在 `USE_SERIES=0` 或需要单文件试重时参考。
 - **旁路不合并**：Kiro/Antigravity/账号池全部放在 AIClient2API / CLIProxyAPI / Sub2API。
 - **每次升级都从新 tag 建 worktree**，不直接在当前工作区 rebase，避免污染。
 - **升级必须过构建 + 单测 + 冒烟**，不通过就回滚。
 
 ## 2. 补丁布局
 
-| 文件 | 内容 | 基线 |
+| 路径 | 内容 | 基线 |
 |---|---|---|
-| `patches/0001-daily-limit-core.patch` | 后端：配置、过滤器、选路、计数、结算、任务计费 | main |
-| `patches/0002-daily-limit-web.patch` | 前端：渠道表单 + 7 语言 | main |
-| `patches/0003-console-block-adaptation.patch` | 前端：把 `daily_token_limit` 登记进"其他设置"区块（区块跳转/已配置标记） | main + rc.46（已在带 0001+0002 的 main 工作树 `git apply --check` 通过） |
-| `patches/channel-daily-limit-main.patch` | 合并版，main 基线 | main |
-| `patches/channel-daily-limit.patch` | 合并版，rc.46 基线 | rc.46 |
+| `patches/series/00NN-*.patch` | **主机制**：分支提交序列（后端 / 前端 / 成品层 / gitattributes / 同步工具 / 品牌） | 由 `UPSTREAM_BASE`（默认 `v1.0.0-rc.46`）之上的提交生成 |
+| `patches/legacy/0001-daily-limit-core.patch` | 后端：配置、过滤器、选路、计数、结算、任务计费 | main（历史） |
+| `patches/legacy/0002-daily-limit-web.patch` | 前端：渠道表单 + 7 语言 | main（历史） |
+| `patches/legacy/0003-console-block-adaptation.patch` | 前端：日限额登记进"其他设置"区块 | main + rc.46（历史） |
+| `patches/legacy/channel-daily-limit*.patch` | 合并版工作区 diff | main / rc.46（历史） |
 
-升级时优先用分段 patch：冲突更容易定位。
+升级时用 series；单文件 patch 只在定位历史差异时用。
 
 ## 3. 标准升级流程
 
@@ -39,17 +41,26 @@
 脚本会：
 
 1. fetch upstream tags
-2. 创建 `../new-api-v1.0.0-rc.47` worktree
-3. 依次 `git apply --3way` 默认的 main 分段 patch
-4. 打印后续命令
+2. 创建 `../new-api-<tag>` worktree
+3. `git am -3 --no-keep-cr patches/series/*.patch` 重放提交序列
+4. 若重放用的是 file patch（`USE_SERIES=0`），再把产品层复制过去
+5. 打印后续命令
 
-补丁基线说明：
-
-- 默认 `PATCH_FILES` 使用 `0001` + `0002` + `0003`（main 基线）。
-- 如果目标是 `v1.0.0-rc.46` 这类旧基线，使用合并补丁：
+失败时：
 
 ```bash
-PATCH_FILES="patches/channel-daily-limit.patch" \
+cd ../new-api-v1.0.0-rc.47
+git am --abort          # 整体退回干净的 tag 状态
+```
+
+重放模式说明：
+
+- 默认走 series（`UPSTREAM_BASE` 决定 series 的基线，默认 `v1.0.0-rc.46`）。
+- 需要退回 pre-commit 的 file patch 时：
+
+```bash
+USE_SERIES=0 \
+PATCH_FILES="patches/legacy/channel-daily-limit.patch" \
   ./scripts/upstream-sync.sh apply v1.0.0-rc.46
 ```
 
@@ -115,24 +126,22 @@ git diff --check
 - [ ] `/v1/images/generations` 200（mock 或真实 Key）
 - [ ] 日限额：第一次 200，第二次 429，调高后恢复
 
-### 3.6 导出新基线 patch
+### 3.6 导出新基线 series
 
-在目标 worktree 中：
+在新 worktree 里把提交落到分支后（或直接在主工作区）：
 
 ```bash
-git add -N common/channel_daily_limit.go common/channel_daily_limit_test.go \
-  model/channel_daily_limit.go model/channel_daily_limit_test.go \
-  service/channel_daily_limit.go
-
-git diff --binary HEAD -- common constant dto i18n model relaykit service \
-  > ../new-api-rc46/patches/0001-daily-limit-core.patch
-
-git diff --binary HEAD -- web/src \
-  > ../new-api-rc46/patches/0002-daily-limit-web.patch
-
-git diff --binary HEAD \
-  > ../new-api-rc46/patches/channel-daily-limit-main.patch
+# 基线 tag 变了就传新的
+./scripts/upstream-sync.sh export-series v1.0.0-rc.47
+# 只校验不重写
+./scripts/upstream-sync.sh verify-series v1.0.0-rc.47
 ```
+
+`export-series` 做三件事：`git format-patch --binary` 生成 `patches/series/`、比对提交范围与
+series 覆盖的文件集合（fail-closed：任何非产品层、非构建产物的改动没进 series 就报错）、
+并拒绝在有未提交功能改动的状态下导出。
+
+旧的 `export` / `verify-patch`（工作区 diff）仍在，只用于 pre-commit 场景。
 
 ### 3.7 发布
 
@@ -150,7 +159,7 @@ git diff --binary HEAD \
 - 镜像回滚：保留上一个 `new-api-daily-limit:<version>` 镜像，compose 切回旧 tag。
 - 数据库：升级前备份 Postgres；new-api 迁移通常向前兼容，但仍需备份。
 - 旁路：AIClient2API/Sub2API 使用固定版本 tag，不追 `latest`。
-- patch：保留每个上游基线对应的 patch 文件，不覆盖历史。
+- 重放：`git am --abort` 让 worktree 回到干净 tag；`patches/series/` 按基线目录保留，不覆盖历史。
 
 ## 5. 监控清单
 
@@ -173,6 +182,7 @@ git diff --binary HEAD \
 最小 CI 门禁：
 
 ```bash
+./scripts/upstream-sync.sh verify-series        # 提交范围 == patches/series（fail-closed）
 go build ./...
 (cd relaykit && GOWORK=off go build ./...)
 go test ./common -run Daily -count=1
@@ -180,6 +190,14 @@ go test ./model -run 'Daily|FilterCandidate|TaskPlugin' -count=1
 go test ./service -run 'TestSettle_|TestTaskBilling|TestLogTaskConsumption|TestRecalculate' -count=1
 (cd web && bun run typecheck)
 docker compose -f docker-compose.poc.yml config --quiet
+```
+
+端到端门禁（需要 compose 栈 + `node scripts/mock-upstream.cjs`）：
+
+```bash
+node scripts/verify-daily-limit.mjs      # 日限额 10 项边界
+node scripts/verify-compat.mjs           # 协议/接线 7 项
+node scripts/verify-channel-types.mjs    # 17 种渠道类型的面板适配
 ```
 
 可选：
@@ -195,5 +213,5 @@ docker compose -f docker-compose.poc.yml config --quiet
 - 构建/单测/类型检查全绿（允许上游既存失败单独记录）
 - 核心冒烟 5 项通过
 - 私有补丁冲突已解决且未扩大
-- 已导出新基线 patch
+- 已导出并校验新基线 series（`verify-series` 通过，提交范围与 patches/series 一致）
 - 有回滚镜像和数据库备份

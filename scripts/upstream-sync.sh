@@ -314,6 +314,11 @@ cmd_apply() {
     exit 1
   fi
   git worktree add "$target" "$tag"
+  # patches/series is generated, not tracked: build it from the branch if absent.
+  if [ "${USE_SERIES:-1}" = "1" ] && ! ls "$ROOT/$SERIES_DIR"/*.patch >/dev/null 2>&1; then
+    echo "==> no series found, exporting from $UPSTREAM_BASE"
+    (cd "$ROOT" && cmd_export_series "$UPSTREAM_BASE") || exit 1
+  fi
   (
     cd "$target"
     if [ "${USE_SERIES:-1}" = "1" ] && ls "$ROOT/$SERIES_DIR"/*.patch >/dev/null 2>&1; then
