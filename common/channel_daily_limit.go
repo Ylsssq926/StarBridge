@@ -11,13 +11,15 @@ import (
 	"github.com/go-redis/redis/v8"
 )
 
-// channelDailyMetric names one per-day usage counter maintained per channel.
-// Two metrics are tracked because they cover different upstream realities:
+// channelDailyMetric names one per-day counter maintained per channel. Two
+// usage metrics are tracked because they cover different upstream realities:
 // tokens for text relay, requests for async tasks and per-call priced work.
+// The third metric counts budget rejections and is observability only.
 type channelDailyMetric struct {
 	name          string // fallback-key namespace and log wording
 	keyFmt        string // Redis key format: channel id, then date
 	redisDisabled string // one-shot warning text
+	failureHint   string // what going wrong means, per metric
 }
 
 var (
@@ -25,11 +27,19 @@ var (
 		name:          "tokens",
 		keyFmt:        constant.ChannelDailyTokenUsageKeyFmt,
 		redisDisabled: "Redis is disabled; channel daily token usage falls back to in-process memory and is not consistent across multiple instances",
+		failureHint:   "daily limit may not take effect across instances",
 	}
 	channelDailyRequestMetric = channelDailyMetric{
 		name:          "requests",
 		keyFmt:        constant.ChannelDailyRequestUsageKeyFmt,
 		redisDisabled: "Redis is disabled; channel daily request usage falls back to in-process memory and is not consistent across multiple instances",
+		failureHint:   "daily limit may not take effect across instances",
+	}
+	channelDailyRejectMetric = channelDailyMetric{
+		name:          "rejects",
+		keyFmt:        constant.ChannelDailyRejectUsageKeyFmt,
+		redisDisabled: "Redis is disabled; channel daily rejection counts fall back to in-process memory and only cover this instance",
+		failureHint:   "rejection counts may be under-reported across instances",
 	}
 )
 
@@ -139,7 +149,7 @@ func increaseChannelDailyUsage(metric channelDailyMetric, channelID int, delta i
 		if err != nil {
 			startChannelDailyFallbackCleanup()
 			addChannelDailyFallbackUsage(metric, channelID, delta, now)
-			fallbackErr := fmt.Errorf("channel daily %s usage NOT recorded in Redis, daily limit may not take effect across instances: channel_id=%d, delta=%d, error=%w", metric.name, channelID, delta, err)
+			fallbackErr := fmt.Errorf("channel daily %s usage NOT recorded in Redis (%s): channel_id=%d, delta=%d, error=%w", metric.name, metric.failureHint, channelID, delta, err)
 			SysError(fallbackErr.Error())
 			return fallbackErr
 		}
@@ -189,4 +199,17 @@ func IsChannelDailyRequestUsageAvailable(channelID int, limit int64) bool {
 // IncreaseChannelDailyRequestUsage records one billable request for the current day.
 func IncreaseChannelDailyRequestUsage(channelID int) error {
 	return increaseChannelDailyUsage(channelDailyRequestMetric, channelID, 1)
+}
+
+// GetChannelDailyRejectUsage returns how many times a live request skipped this
+// channel today because a per-day budget was already exhausted.
+func GetChannelDailyRejectUsage(channelID int) int64 {
+	return getChannelDailyUsage(channelDailyRejectMetric, channelID)
+}
+
+// IncreaseChannelDailyRejectUsage counts one budget rejection for the current
+// day. Losing this counter (Redis flush, restart, another instance) only affects
+// the reported number, never enforcement.
+func IncreaseChannelDailyRejectUsage(channelID int) error {
+	return increaseChannelDailyUsage(channelDailyRejectMetric, channelID, 1)
 }

@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
@@ -65,18 +66,26 @@ func channelWithinDailyRequestLimit(channel *Channel) bool {
 }
 
 // channelDailyLimitViolation returns which per-day budget a channel exhausted,
-// or "" while both budgets still have room.
+// or "" while both budgets still have room. Every request-side decision point
+// funnels through here, so it is also where a budget rejection is counted: one
+// increment per (request, over-budget channel) pair, regardless of cache or
+// database selection path.
 func channelDailyLimitViolation(channel *Channel) dto.ChannelFilterKind {
 	if channel == nil {
 		return ""
 	}
+	kind := dto.ChannelFilterKind("")
 	if !channelWithinDailyTokenLimit(channel) {
-		return dto.FilterDailyTokenLimit
+		kind = dto.FilterDailyTokenLimit
+	} else if !channelWithinDailyRequestLimit(channel) {
+		kind = dto.FilterDailyRequestLimit
 	}
-	if !channelWithinDailyRequestLimit(channel) {
-		return dto.FilterDailyRequestLimit
+	if kind != "" {
+		if err := common.IncreaseChannelDailyRejectUsage(channel.Id); err != nil {
+			common.SysError(fmt.Sprintf("failed to count channel daily rejection: channel_id=%d, error=%v", channel.Id, err))
+		}
 	}
-	return ""
+	return kind
 }
 
 // channelWithinDailyLimits reports whether the channel still has room in every
