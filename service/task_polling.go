@@ -719,6 +719,9 @@ func settleTaskBillingOnComplete(ctx context.Context, adaptor TaskPollingAdaptor
 		tokens = taskResult.CompletionTokens
 	}
 	if tokens > 0 {
+		if err := IncreaseChannelDailyTokenUsage(task.ChannelId, int64(tokens)); err != nil {
+			logger.LogError(ctx, common.LogText("channel daily token usage not recorded: %s", err.Error()))
+		}
 		return RecalculateTaskQuotaByTokens(ctx, task, tokens)
 	}
 	return false

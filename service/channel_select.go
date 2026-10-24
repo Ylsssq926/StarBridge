@@ -128,6 +128,7 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 		// startGroupIndex: 开始搜索的分组索引
 		startGroupIndex := 0
 		crossGroupRetry := common.GetContextKeyBool(param.Ctx, constant.ContextKeyTokenCrossGroupRetry)
+		dailyLimited := false
 
 		if lastGroupIndex, exists := common.GetContextKey(param.Ctx, constant.ContextKeyAutoGroupIndex); exists {
 			if idx, ok := lastGroupIndex.(int); ok {
@@ -147,12 +148,15 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			}
 			logger.LogDebug(param.Ctx, "Auto selecting group: %s, priorityRetry: %d", autoGroup, priorityRetry)
 
-			channel, _ = model.GetRandomSatisfiedChannel(
+			channel, err = model.GetRandomSatisfiedChannel(
 				autoGroup,
 				param.ModelName,
 				priorityRetry,
 				filters,
 			)
+			if err != nil && errors.Is(err, model.ErrChannelDailyTokenLimit) {
+				dailyLimited = true
+			}
 			if channel == nil {
 				// Current group has no available channel for this model, try next group
 				// 当前分组没有该模型的可用渠道，尝试下一个分组
@@ -188,6 +192,9 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 				common.SetContextKey(param.Ctx, constant.ContextKeyAutoGroupIndex, i)
 			}
 			break
+		}
+		if channel == nil && dailyLimited {
+			return nil, selectGroup, model.ErrChannelDailyTokenLimit
 		}
 	} else {
 		channel, err = model.GetRandomSatisfiedChannel(
@@ -297,6 +304,9 @@ func SelectChannelForRequest(c *gin.Context, modelName string, retry *RetryParam
 			return nil, "", pinnedChannelUnavailable(pin, http.StatusForbidden, i18n.MsgDistributorChannelDisabled)
 		}
 		if ok, kind := model.ChannelSatisfiesFilters(channel, modelName, constraints.Filters); !ok {
+			if kind == dto.FilterDailyTokenLimit {
+				return nil, "", dailyTokenLimitExceededError(modelName, common.GetContextKeyString(c, constant.ContextKeyUsingGroup), channel)
+			}
 			return nil, "", &ChannelSelectError{
 				StatusCode: http.StatusBadRequest, Code: types.ErrorCode(kind), MessageID: i18n.MsgDistributorNoAvailableChannel,
 				Params:     map[string]any{"Group": common.GetContextKeyString(c, constant.ContextKeyUsingGroup), "Model": modelName},
@@ -354,6 +364,9 @@ func SelectChannelForRequest(c *gin.Context, modelName string, retry *RetryParam
 			if usingGroup == "auto" {
 				showGroup = fmt.Sprintf("auto(%s)", selectGroup)
 			}
+			if errors.Is(err, model.ErrChannelDailyTokenLimit) {
+				return nil, selectGroup, dailyTokenLimitExceededError(modelName, showGroup, nil)
+			}
 			return nil, selectGroup, &ChannelSelectError{
 				StatusCode: http.StatusServiceUnavailable, Code: types.ErrorCodeModelNotFound, MessageID: i18n.MsgDistributorGetChannelFailed,
 				Params: map[string]any{"Group": showGroup, "Model": modelName, "Error": err.Error()},
@@ -367,6 +380,9 @@ func SelectChannelForRequest(c *gin.Context, modelName string, retry *RetryParam
 		}
 	}
 	if ok, kind := model.ChannelSatisfiesFilters(channel, modelName, constraints.Filters); !ok {
+		if kind == dto.FilterDailyTokenLimit {
+			return nil, selectGroup, dailyTokenLimitExceededError(modelName, common.GetContextKeyString(c, constant.ContextKeyUsingGroup), channel)
+		}
 		return nil, selectGroup, &ChannelSelectError{
 			StatusCode: http.StatusServiceUnavailable, Code: types.ErrorCodeModelNotFound, MessageID: i18n.MsgDistributorNoAvailableChannel,
 			Params:     map[string]any{"Group": common.GetContextKeyString(c, constant.ContextKeyUsingGroup), "Model": modelName},
@@ -374,6 +390,17 @@ func SelectChannelForRequest(c *gin.Context, modelName string, retry *RetryParam
 		}
 	}
 	return channel, selectGroup, nil
+}
+
+func dailyTokenLimitExceededError(modelName, group string, channel *model.Channel) *ChannelSelectError {
+	return &ChannelSelectError{
+		StatusCode: http.StatusTooManyRequests,
+		Code:       types.ErrorCodeChannelDailyTokenLimitExceeded,
+		MessageID:  i18n.MsgDistributorChannelDailyTokenLimitExceeded,
+		Params:     map[string]any{"Group": group, "Model": modelName},
+		FilterKind: dto.FilterDailyTokenLimit,
+		Channel:    channel,
+	}
 }
 
 // Origin-task pins report a fixed code so task polling can tell a retired

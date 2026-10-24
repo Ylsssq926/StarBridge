@@ -35,6 +35,9 @@ type ChannelSettings struct {
 	// TLSInsecureSkipVerify accepts upstream certificates that fail
 	// verification, such as self-signed ones, for this channel only.
 	TLSInsecureSkipVerify bool `json:"tls_insecure_skip_verify,omitempty"`
+	// DailyTokenLimit caps billable input + output tokens per channel per local
+	// day. Zero or negative means unlimited.
+	DailyTokenLimit int64 `json:"daily_token_limit,omitempty"`
 }
 
 // BindsTaskPlugin reports whether the channel is bound to the task plugin,

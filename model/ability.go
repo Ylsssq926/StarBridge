@@ -116,7 +116,8 @@ func GetChannel(
 	if err != nil {
 		return nil, err
 	}
-	abilities = filterAbilitiesByConstraints(abilities, model, filters)
+	abilities, emptiedBy := filterAbilitiesByConstraints(abilities, model, filters)
+	dailyLimited := len(abilities) == 0 && emptiedBy == dto.FilterDailyTokenLimit
 	// Like the memory cache, retry with the routing name (for example without
 	// @ modifiers) when no channel serves the exact name.
 	if normalized := ratio_setting.RoutingMatchModelName(model); len(abilities) == 0 && normalized != "" && normalized != model {
@@ -124,7 +125,10 @@ func GetChannel(
 		if err != nil {
 			return nil, err
 		}
-		abilities = filterAbilitiesByConstraints(abilities, model, filters)
+		abilities, emptiedBy = filterAbilitiesByConstraints(abilities, model, filters)
+		if len(abilities) == 0 && emptiedBy == dto.FilterDailyTokenLimit {
+			dailyLimited = true
+		}
 	}
 	if len(abilities) > 0 {
 		priorities := make([]int64, 0)
@@ -166,6 +170,9 @@ func GetChannel(
 			}
 		}
 	} else {
+		if dailyLimited {
+			return nil, ErrChannelDailyTokenLimit
+		}
 		return nil, nil
 	}
 	err = DB.First(&channel, "id = ?", channel.Id).Error
@@ -175,9 +182,9 @@ func GetChannel(
 // filterAbilitiesByConstraints applies the same ChannelSatisfiesFilters
 // predicate used by the memory-cache path. A failed channel lookup fails
 // closed when a task-plugin identity is required and fails open otherwise.
-func filterAbilitiesByConstraints(abilities []Ability, modelName string, filters []dto.ChannelFilter) []Ability {
+func filterAbilitiesByConstraints(abilities []Ability, modelName string, filters []dto.ChannelFilter) ([]Ability, dto.ChannelFilterKind) {
 	if len(abilities) == 0 {
-		return nil
+		return nil, ""
 	}
 
 	channelIds := make([]int, 0, len(abilities))
@@ -193,9 +200,9 @@ func filterAbilitiesByConstraints(abilities []Ability, modelName string, filters
 	var channels []*Channel
 	if err := DB.Where("id IN ?", channelIds).Find(&channels).Error; err != nil {
 		if identityFilterRequiresKey(filters) {
-			return nil
+			return nil, ""
 		}
-		return abilities
+		return abilities, ""
 	}
 
 	channelsByID := make(map[int]*Channel, len(channels))
@@ -204,13 +211,25 @@ func filterAbilitiesByConstraints(abilities []Ability, modelName string, filters
 	}
 
 	filtered := make([]Ability, 0, len(abilities))
+	dailyLimited := 0
+	otherFiltered := 0
 	for _, ability := range abilities {
 		channel := channelsByID[ability.ChannelId]
-		if ok, _ := ChannelSatisfiesFilters(channel, modelName, filters); ok {
+		ok, kind := ChannelSatisfiesFilters(channel, modelName, filters)
+		if ok {
 			filtered = append(filtered, ability)
+			continue
+		}
+		if kind == dto.FilterDailyTokenLimit {
+			dailyLimited++
+		} else {
+			otherFiltered++
 		}
 	}
-	return filtered
+	if len(filtered) == 0 && dailyLimited > 0 && otherFiltered == 0 {
+		return filtered, dto.FilterDailyTokenLimit
+	}
+	return filtered, ""
 }
 
 func identityFilterRequiresKey(filters []dto.ChannelFilter) bool {

@@ -8,6 +8,7 @@ import (
 )
 
 var filterEvalOrder = []dto.ChannelFilterKind{
+	dto.FilterDailyTokenLimit,
 	dto.FilterRequestPath,
 	dto.FilterTaskPluginEndpoint,
 	dto.FilterTaskPluginIdentity,
@@ -22,6 +23,12 @@ func ChannelSatisfiesFilters(ch *Channel, modelName string, filters []dto.Channe
 		return false, ""
 	}
 	for _, kind := range filterEvalOrder {
+		if kind == dto.FilterDailyTokenLimit {
+			if !channelWithinDailyTokenLimit(ch) {
+				return false, kind
+			}
+			continue
+		}
 		for _, filter := range filters {
 			if filter.Kind != kind {
 				continue
@@ -44,6 +51,22 @@ func filterCandidateIDs(ids []int, modelName string, filters []dto.ChannelFilter
 	}
 	kept = ids
 	for _, kind := range filterEvalOrder {
+		if kind == dto.FilterDailyTokenLimit {
+			next := make([]int, 0, len(kept))
+			for _, id := range kept {
+				channel, exists := channelsIDM[id]
+				// Preserve missing ids so the downstream consistency error is
+				// still reported instead of being masked by the daily cap.
+				if !exists || channelWithinDailyTokenLimit(channel) {
+					next = append(next, id)
+				}
+			}
+			if len(kept) > 0 && len(next) == 0 {
+				return next, kind
+			}
+			kept = next
+			continue
+		}
 		kindFilters := filtersByKind(filters, kind)
 		if len(kindFilters) == 0 {
 			continue
@@ -122,6 +145,8 @@ func channelMatchesFilter(ch *Channel, modelName string, filter dto.ChannelFilte
 		// group, priority, weight, affinity, and pin rules. Unrelated type-61
 		// plugins cannot execute this endpoint.
 		return ch.Type != constant.ChannelTypeTaskPlugin || pluginChannel
+	case dto.FilterDailyTokenLimit:
+		return channelWithinDailyTokenLimit(ch)
 	case dto.FilterResponsesWebSocket:
 		if !ch.GetSetting().ResponsesWebSocketEnabled {
 			return false

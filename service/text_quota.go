@@ -461,6 +461,12 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	} else {
 		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, summary.Quota)
 		model.UpdateChannelUsedQuota(relayInfo.ChannelId, summary.Quota)
+		// Daily caps count billable input + output only; cache hits and cache
+		// creation are excluded, matching what upstreams charge against their
+		// own daily allowances.
+		if err := IncreaseChannelDailyTokenUsage(relayInfo.ChannelId, int64(summary.PromptTokens+summary.CompletionTokens)); err != nil {
+			logger.LogError(ctx, common.LogText("channel daily token usage not recorded: %s", err.Error()))
+		}
 	}
 
 	if err := SettleBilling(ctx, relayInfo, summary.Quota); err != nil {
