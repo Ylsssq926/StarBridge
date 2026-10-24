@@ -145,7 +145,7 @@ series 覆盖的文件集合（fail-closed：任何非产品层、非构建产�
 
 ### 3.7 发布
 
-1. 先改 `PRODUCT_VERSION`（补丁级修复 +0.0.1，跟上游一次基线 +0.1.0），再构建镜像：`./scripts/build-image.sh`
+1. 先改 `PRODUCT_VERSION`：补丁级修复 `+0.0.1`，新增用户可见功能 `+0.1.0`，跟一次上游基线 `+0.x.0` 后视情况进位。然后构建镜像：`./scripts/build-image.sh`
 2. **版本 tag 不可变**：`new-api-daily-limit:<version>` 一旦对外用过就不能重新构建覆盖；内容变了必须升版本。`local` 只是本机滚动 tag。
 3. 发布前门禁：`./scripts/upstream-sync.sh export && ./scripts/upstream-sync.sh verify-patch`
    （`export` 已内嵌同一次校验；`verify-patch` 采用 fail-closed：任何非产品层、非构建产物的改动没进 patch 就报错）

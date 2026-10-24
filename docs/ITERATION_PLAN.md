@@ -44,8 +44,8 @@
 - [ ] 为每个订阅类渠道设置 `daily_token_limit`
 - [ ] 接入 Redis，保证多实例日限额一致
 - [ ] 用真实 Key 复跑 `scripts/verify-channel-types.mjs`（目前 41/57/58/61 的必填项只有 mock 级别验证）
-- [ ] 生图/视频任务计入日限额：类型 61 与按次计费任务当前不返回 token，因此不累加，需要按"次"或按图片数计量
-- [ ] 面板适配回归纳入发布流程：`node scripts/verify-channel-types.mjs` + `bunx vitest run src/features/channels`
+- [x] 生图/视频任务计入日限额：新增独立的 `daily_request_limit`（按请求条数计量，任务提交即计数），不改 token 语义、不做图片折算 token
+- [x] 面板适配回归纳入发布流程：`node scripts/verify-channel-types.mjs` + `bunx vitest run src/features/channels`
 
 验收：
 

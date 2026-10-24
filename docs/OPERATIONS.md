@@ -47,12 +47,19 @@
 
 「编码计划」类特殊 Base 也是内置的（`ChannelSpecialBases`）：`glm-coding-plan`、`glm-coding-plan-international`、`kimi-coding-plan`、`doubao-coding-plan`，每一条都同时带 OpenAI 兼容地址和 Claude 兼容地址，渠道里选到对应项即可，不用自己拼 URL。
 
-补丁新增的字段：**每日 Token 限额**（渠道「其他设置」内，`daily_token_limit`，0 = 不限制），到顶后该渠道返回 429 `channel:daily_token_limit_exceeded`，同组其他渠道继续服务。
+补丁新增两个字段，都在渠道「其他设置」里，0 = 不限制：
+
+| 字段 | key | 计量内容 | 到顶返回 |
+|---|---|---|---|
+| 每日 Token 限额 | `daily_token_limit` | 可计费的输入 + 输出 token（缓存不计入） | 429 `channel:daily_token_limit_exceeded` |
+| 每日请求数限额 | `daily_request_limit` | 可计费的**请求条数**，包括生图/视频等不回报用量的按次任务 | 429 `channel:daily_request_limit_exceeded` |
+
+两个预算互相独立：只设其中一个也能生效；到顶的渠道被跳过，同组其他渠道继续服务，次日零点（容器本地时区）自动重置。
 
 ## 4. 接一个新源的标准动作
 
 1. `/channels` → 新建 → 选类型、填 Base URL + Key、填模型名（逗号分隔）、分组（如 `default`）。
-2. 需要限流就在「其他设置」里填「每日 Token 限额」。
+2. 需要限流就在「其他设置」里填「每日 Token 限额」和/或「每日请求数限额」。账号型上游建议两个都设：token 限额挡住文本刷量，请求数限额挡住生图/视频这类不回报 token 的消耗。
 3. `/system-settings/models` 里确认这些模型有倍率或按次价格。
 4. `/playground` 选该渠道对应的分组与模型，发一条测试。
 5. `/usage-logs` 核对渠道 id、token 数与花费。
@@ -86,7 +93,7 @@ curl http://<host>:3800/v1/chat/completions \
 |---|---|---|
 | 1 / 14 / 17 / 24 / 25 / 43 / 45 / 54 / 59 / 60 / 62 / 63 | 直接可建 | 保存、更新后保留，到顶 429 |
 | 58 Advanced Custom | 必须填 `advanced_custom` 路由（面板里有专门表单） | 与限额共存，到顶 429 |
-| 61 Task Plugin | 必须选已注册插件 key（本机内置 `alibaba`，可在 `/task-plugins` 或 `GET /api/plugin/task` 查） | `task_plugin_key` 与 `daily_token_limit` 共存互不覆盖；**但生图/视频任务不返回 token，不会累加限额** |
+| 61 Task Plugin | 必须选已注册插件 key（本机内置 `alibaba`，可在 `/task-plugins` 或 `GET /api/plugin/task` 查） | `task_plugin_key` 与两个日限额字段共存互不覆盖；生图任务不回报 token，但**会计入每日请求数限额** |
 | 41 VertexAI | 必须填 Deployment Region | 未单独跑通，与不带限额时校验结果一致 |
 | 57 Codex | 必须粘贴 OAuth JSON Key | 同上 |
 | 16 Zhipu | 直接可建 | 限额本身正常，只是假上游没实现智谱路径，未断言 |
@@ -94,7 +101,7 @@ curl http://<host>:3800/v1/chat/completions \
 要点：
 
 - 日限额字段对所有渠道类型都可见、可保存，改别的字段不会丢它。
-- 生图/视频类渠道（61、以及按次计费的图片任务）目前不受日限额约束，规划里已排进 P1（改成按次/按图计量）。
+- 生图/视频类渠道（61，以及按次计费的图片任务）不回报 token，因此**不受 `daily_token_limit` 约束**，但要设 `daily_request_limit` —— 它按请求条数计量，正好覆盖这类消耗。
 - 想复跑这套检查：`node scripts/verify-channel-types.mjs`，它会自建自清理渠道。
 
 ## 7. 边界与排错速查
@@ -104,6 +111,7 @@ curl http://<host>:3800/v1/chat/completions \
 | 建完渠道马上 503 `No available channel` | 内存缓存同步周期（PoC 设 `SYNC_FREQUENCY=5`） | 等 5~10s；或临时关掉 `MEMORY_CACHE_ENABLED` |
 | 400 `model_price_error` | 模型没定价 | 去「系统设置 → 模型/运营」补倍率或按次价格 |
 | 429 `channel:daily_token_limit_exceeded` | 该渠道当日 token 已到达上限 | 面板里调高限额或置 0；次日零点（容器本地时区）自动重置 |
+| 429 `channel:daily_request_limit_exceeded` | 该渠道当日请求数已到达上限（生图/按次任务也算） | 同上；账号型上游建议两个预算都设 |
 | 503 与 429 混淆 | 两者语义不同：503 = 没有候选渠道；429 = 候选都在日限额上 | 已实测区分，无需处理 |
 | 刚发的请求没算进日限额 | 用量在响应发出后的结算阶段写入，瞬时并发可略微超限 | 与额度扣减同样的最终一致语义 |
 | 令牌 Key 看不到了 | 接口只返回掩码 Key（安全设计） | 只能创建当次复制；必要时新建令牌 |

@@ -58,9 +58,14 @@
 | 限额改回 0（不限制） | 连续两次 200 | 通过 |
 | 已有超额用量后把限额调低 | 立即 429 | 通过 |
 | 把限额调高 | 同步周期内恢复 200 | 通过 |
-| 内存缓存选路（`MEMORY_CACHE_ENABLED=true`） | 10/10 | 通过 |
-| 数据库选路（`MEMORY_CACHE_ENABLED=false`） | 10/10 | 通过 |
-| 未启用 Redis（进程内回退计数） | 10/10 | 通过 |
+| `daily_request_limit=1` + 生图请求（无 token 回报） | 第一次 200，第二次 429 `channel:daily_request_limit_exceeded` | 通过 |
+| 清空 `daily_request_limit` | 生图渠道恢复 200 | 通过 |
+| `daily_request_limit=2` + 文本请求 | 200 / 200 / 429（请求数计量，与 token 无关） | 通过 |
+| 内存缓存选路（`MEMORY_CACHE_ENABLED=true`） | 14/14 | 通过 |
+| 数据库选路（`MEMORY_CACHE_ENABLED=false`） | 10/10（旧版脚本） | 通过 |
+| 未启用 Redis（进程内回退计数） | 10/10（旧版脚本） | 通过 |
+
+单元层：`go test ./common -run Daily`（token/request 两个计数器互不串扰）与 `go test ./model -run 'Daily|FilterCandidate'`（两个预算的过滤器归因、预算同时耗尽时优先报 token）均通过。
 
 协议/接线兼容（`verify-compat.mjs`，7/7）：
 
@@ -150,8 +155,8 @@
 
 ## 9. 已知边界
 
-1. **日限额计数语义**：只统计可计费的输入 + 输出 token；缓存命中、缓存创建不计入。上限是渠道级，不是模型级。
-2. **任务计费覆盖**：只覆盖“返回 totalTokens 并按 token 重算”的任务；按次计费、纯 tiered usage 且不返回 token 的任务不会累加日限额。
+1. **日限额计数语义**：`daily_token_limit` 只统计可计费的输入 + 输出 token（缓存命中与缓存创建不计入）；`daily_request_limit` 统计可计费的请求条数。两者都是渠道级，不是模型级。
+2. **按次/任务计量覆盖**：文本、音频、WebSocket 与任务提交都会计入请求数；生图/视频等不回报 token 的任务只计入请求数，因此这类渠道要设 `daily_request_limit` 才有效。token 预算仍只覆盖“返回 token 用量”的路径。
 3. **多实例一致性**：日限额依赖 Redis；未启用 Redis 时退化为进程内计数，多实例会不一致。
 4. **性能**：候选渠道过滤会解析一次 `setting` JSON；渠道数量很大时应增加 `channelID -> daily limit` 缓存。
 5. **PoC 安全边界**：compose 是验证环境，镜像默认 root、未启用 TLS、`SESSION_COOKIE_SECURE` 未开；生产需加反向代理、TLS、非 root、密钥管理和备份。

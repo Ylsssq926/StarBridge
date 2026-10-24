@@ -1,4 +1,4 @@
-# 星桥 StarBridge · New API 国内模型网关（成品说明 v0.1.2）
+# 星桥 StarBridge · New API 国内模型网关（成品说明 v0.2.0）
 
 ## 名称与来源
 
@@ -44,7 +44,7 @@
 | `patches/series/` | **主机制**：由分支提交生成的 patch series（`git am -3` 重放） |
 | `patches/legacy/` | pre-commit 基线的手工 file patch，仅供 `USE_SERIES=0` 回退与历史对照 |
 
-已构建镜像：`new-api-daily-limit:local` / `:0.1.2`，别名 `starbridge-gateway:local` / `:0.1.2`（约 312MB，含 `LICENSE`、`NOTICE`、`THIRD-PARTY-LICENSES.md`）。版本 tag 不可变：内容变化必须升 `PRODUCT_VERSION`。
+已构建镜像：`new-api-daily-limit:local` / `:0.2.0`，别名 `starbridge-gateway:local` / `:0.2.0`（约 312MB，含 `LICENSE`、`NOTICE`、`THIRD-PARTY-LICENSES.md`）。版本 tag 不可变：内容变化必须升 `PRODUCT_VERSION`。
 
 ## 快速启动
 
@@ -107,7 +107,7 @@ docker compose -f docker-compose.poc.yml up -d
    | OpenAI/GPT-Image | 1 | 官方或兼容 Base URL + Key |
 
 3. AIClient2API 首次启动后，在 `http://localhost:3100` 添加 Kiro/Antigravity 账号。
-4. 给订阅类渠道设置“每日 Token 限额”，避免单账号被跑穿。
+4. 给订阅类渠道设置“每日 Token 限额”和“每日请求数限额”：前者挡文本刷量，后者挡生图/视频等不回报用量的按次消耗，避免单账号被跑穿。
 
 ## 设计原则
 
