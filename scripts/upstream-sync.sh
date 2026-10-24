@@ -301,6 +301,19 @@ cmd_check_full() {
   SKIP_TYPECHECK=1 cmd_check "$dir"
 }
 
+# Is this directory a detached, fully committed replay worktree that a previous
+# drill left behind? Only then may apply drop it automatically: a checked-out
+# branch or any uncommitted tracked change means someone is working there.
+is_stale_replay_worktree() {
+  local dir="$1" tag="$2"
+  [ -f "$dir/.git" ] || return 1
+  grep -qiF ".git/worktrees/$(basename "$dir")" "$dir/.git" || return 1
+  git -C "$dir" symbolic-ref -q HEAD >/dev/null && return 1
+  [ -z "$(git -C "$dir" status --porcelain --untracked-files=no)" ] || return 1
+  git -C "$dir" merge-base --is-ancestor "$tag" HEAD >/dev/null 2>&1 || return 1
+  return 0
+}
+
 cmd_apply() {
   local tag="${1:-}"
   if [ -z "$tag" ]; then
@@ -310,8 +323,20 @@ cmd_apply() {
   ensure_remote
   local target="$WORKTREE_ROOT/new-api-$tag"
   if [ -e "$target" ]; then
-    echo "target already exists: $target" >&2
-    exit 1
+    if [ "${REPLAY_CLEANUP:-1}" = "1" ] && is_stale_replay_worktree "$target" "$tag"; then
+      # --force only clears generated leftovers (web/dist, node_modules); the
+      # predicate above already proved there is no uncommitted tracked change.
+      echo "==> dropping stale replay worktree: $target"
+      git worktree remove --force "$target" || {
+        echo "failed to remove stale replay worktree: $target" >&2
+        exit 1
+      }
+      git worktree prune
+    else
+      echo "target exists but is not a clean detached replay of $tag: $target" >&2
+      echo "  inspect it yourself; REPLAY_CLEANUP=0 keeps this refusal behaviour explicit" >&2
+      exit 1
+    fi
   fi
   git worktree add "$target" "$tag"
   # patches/series is generated, not tracked: build it from the branch if absent.

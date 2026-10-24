@@ -248,6 +248,8 @@ rm docker-compose.poc.override.yml
 | 0.2.0 请求数预算重放 | 12 个提交在纯净 rc.46 worktree 上 `git am -3` 全部成功 → renormalize → `go build` + common/model/service 回归通过（REHEARSAL_020_OK） |
 | 0.2.0 端到端 | `verify-daily-limit` 14/14（三种运行形态）、`verify-compat` 7/7、`verify-channel-types` 17/17 适配 + 15/15 到顶 429 |
 | 三库最小部署形态 | `verify-minimal-deployment`：SQLite 10/10、MySQL 8.4 10/10（`/setup` 首启建管理员 role=100、两个预算原样落库、无 Redis 也能 429）；Postgres 由常驻 PoC 栈的 14 项端到端覆盖 |
+| `apply` 的陈旧重放树处理 | 五条路径逐条实测：首次创建 ✓；再次 apply 自动删除干净的 detached 重放树并重建 ✓；有未提交跟踪改动时拒绝且**改动完整保留** ✓；检出分支时拒绝 ✓；`REPLAY_CLEANUP=0` 时保持拒绝 ✓ |
+| 冲突热点清单 | `docs/UPSTREAM_SYNC.md` 已按重构后的结构重写（日预算与 `filterEvalOrder` 解耦、双计数落点、面板登记表、`.gitattributes`/CI 文件） |
 | CI 门禁落地 | 新增 `.github/workflows/product-gates.yml`（backend / frontend / sync-integrity）；YAML 解析通过，sync-integrity 的等价命令在本地演练通过（CI_SYNC_JOB_WOULD_PASS）。演练中发现 `go:embed web/dist` 会让没有前端产物的重放工作树编译失败，改为由 frontend job 产出 dist 供 replay 使用 |
 
 自审发现的实现过程失误（同样记录，避免"只留成功叙事"）：

@@ -44,7 +44,14 @@
 2. 创建 `../new-api-<tag>` worktree
 3. `git am -3 --no-keep-cr patches/series/*.patch` 重放提交序列
 4. 若重放用的是 file patch（`USE_SERIES=0`），再把产品层复制过去
-5. 打印后续命令
+5. 按最终的 `.gitattributes` 正规化工作区行尾
+6. 打印后续命令
+
+目标目录已存在时的处理（让演练可以无人值守重复，同时不误删在制品）：
+
+- 只有"本仓库注册的、detached HEAD、无未提交跟踪改动、且以该 tag 为祖先"的重放树才会被自动删除重建（`--force` 只为清掉 `web/dist`、`node_modules` 这类生成物）
+- 检出着分支、或有未提交跟踪改动 → 拒绝并保留现场，退出码 1
+- `REPLAY_CLEANUP=0` 可关掉自动清理
 
 失败时：
 
@@ -75,15 +82,22 @@ git status
 git diff --check
 ```
 
-已知冲突热点：
+已知冲突热点（按本轮重构后的实际结构）：
 
+- `common/channel_daily_limit.go`：多指标计数（tokens / requests）与 Redis 不可用时的回退
 - `dto/channel_constraints.go`：上游可能新增 `ChannelFilterKind`
-- `model/channel_constraint.go`：过滤器求值顺序、switch 分支
-- `service/channel_select.go`：固定渠道/亲和/随机选路的错误映射
-- `service/text_quota.go`、`service/quota.go`：结算钩子
-- `service/task_polling.go`：任务完成结算
+- `model/channel_constraint.go`：**日预算已从 `filterEvalOrder` 解耦**，单独在 `ChannelSatisfiesFilters` 与 `filterCandidateIDs` 开头求值；上游若重排该列表，保持"日预算先于请求过滤器"即可
+- `model/channel_daily_limit.go`：`channelDailyLimitViolation` / `IsDailyLimitKind` / 两个哨兵错误
+- `model/ability.go`：数据库选路的 `filterAbilitiesByConstraints` 归因与 `GetChannel` 哨兵
+- `model/channel_cache.go`：内存缓存选路的 `dailyEmptiedBy`
+- `service/channel_select.go`：固定渠道 / 亲和 / 随机选路三处的 429 映射（`dailyLimitExceededError` 按 kind 选码）
+- `service/text_quota.go`、`service/quota.go`：结算钩子（token 与 request 两个计数）
+- `service/task_billing.go`、`service/midjourney.go`：**任务提交即计入请求数**（不依赖 token 回报）
+- `service/task_polling.go`：任务完成结算的 token 累加
 - `web/src/features/channels/lib/channel-form.ts`：表单 schema/默认值/序列化
+- `web/src/features/channels/lib/channel-configuration.ts`：新字段必须登记进 `extraSettings.fields` 与 configured 判定，否则面板行为回归
 - `web/src/features/channels/components/drawers/channel-mutate-drawer.tsx`：字段渲染
+- `.gitattributes`、`.github/workflows/product-gates.yml`：行尾规则与门禁清单
 
 ### 3.4 校验
 
