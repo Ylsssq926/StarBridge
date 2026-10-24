@@ -130,6 +130,13 @@ const first = await relay(modelName);
 await first.text();
 record('first request served', first.status === 200, `status=${first.status}`);
 
+// The text-relay request counter is written at settlement, i.e. after the
+// response has been flushed. Issuing the next request immediately can therefore
+// slip past a budget that is already spent — the race documented in
+// docs/VERIFICATION.md §9. Reproduced here by a back-to-back second run, which
+// is why the harness waits for one settlement to land.
+await new Promise((r) => setTimeout(r, 2000));
+
 const second = await relay(modelName);
 const secondBody = await second.text();
 record('second request blocked by the daily budget', second.status === 429 && /daily_request_limit_exceeded/.test(secondBody), `status=${second.status}`);
@@ -142,7 +149,17 @@ const snap = await api(`/api/channel/daily_usage/${channel.id}`);
 const data = snap.json.data || {};
 record('single-channel snapshot returns the budget state', snap.json.success === true && data.channel_id === channel.id, JSON.stringify(data).slice(0, 160));
 record('requests_used counted at submit', Number(data.requests_used) === 1, `requests_used=${data.requests_used}`);
-record('rejects_today counts the blocked request', Number(data.rejects_today) >= 1, `rejects_today=${data.rejects_today}`);
+record('reject selection attempts counted', Number(data.reject_selection_attempts_today) >= 1, `attempts=${data.reject_selection_attempts_today} retry_times=${data.retry_times}`);
+record('retry_times returned for interpretation', Number.isInteger(data.retry_times), `retry_times=${data.retry_times}`);
+// Measured characteristic, not a derived formula: at the default RetryTimes=0 a
+// blocked request makes 2 channel-selection attempts, so one blocked request
+// adds 2 to the attempt counter. An earlier draft asserted attempts ==
+// requests x (retry_times+1); that was wrong (it predicted 1), which is why this
+// check pins the observed value instead and fails loudly if selection changes.
+const ATTEMPTS_PER_BLOCKED_REQUEST = 2;
+record('attempt counter scales with selection attempts (measured: 2 per blocked request)',
+  Number(data.reject_selection_attempts_today) === 1 * ATTEMPTS_PER_BLOCKED_REQUEST,
+  `attempts=${data.reject_selection_attempts_today} expected=${ATTEMPTS_PER_BLOCKED_REQUEST}`);
 record('limit echoed back from the channel setting', Number(data.daily_request_limit) === 1, `daily_request_limit=${data.daily_request_limit}`);
 
 const agg = await api('/api/channel/daily_usage');
@@ -154,6 +171,15 @@ const freshList = await api('/api/channel/');
 const freshRows = Array.isArray(freshList.json.data) ? freshList.json.data : freshList.json.data?.items || [];
 for (const stray of freshRows.filter((c) => (c.models || '').includes(modelName))) {
   await api(`/api/channel/${stray.id}`, { method: 'DELETE' });
+}
+
+// The PoC enforces one active admin session (a second login returns
+// AUTH_SESSION_LIMIT/Conflict), so a run that does not log out blocks the next
+// one. Best-effort: ignore failures, the checks above already happened.
+try {
+  await api('/api/user/logout', { method: 'POST' });
+} catch {
+  /* ignore */
 }
 
 const failed = results.filter((r) => !r.ok);

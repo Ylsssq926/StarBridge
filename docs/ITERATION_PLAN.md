@@ -110,7 +110,7 @@
 
 - [ ] Postgres + Redis 生产化（备份、连接池、监控）
 - [ ] 日志、错误告警、渠道健康看板
-- [x] 日限额指标（当前用量/限额/拒绝次数）：`GET /api/channel/daily_usage[/:id]` 只读接口 + `rejects` 计数器，端到端 14/14（`scripts/verify-daily-observability.mjs`，2026-10-25）；`rejects_today` 目前是"被跳过评估次数"上界，按 request id 精确去重留作后续项
+- [x] 日限额指标（当前用量/限额/拒绝次数）：`GET /api/channel/daily_usage[/:id]` 只读接口 + `rejects` 计数器，端到端 `scripts/verify-daily-observability.mjs` 通过（2026-10-25）。计数单位是"选路尝试"（实测默认配置下 1 个被挡请求计 2 次，根因见 `docs/VERIFICATION.md` §15），接口一并返回 `retry_times`
 - [ ] 渠道健康看板与告警（把上面的接口接到面板）
 - [x] 备份与恢复演练：`scripts/backup-drill.sh`（Postgres）—— 转储→旁路库恢复→38 张表逐表行数比对→用恢复库真起容器探活，全绿；失败路径实测不会误删同名库。SQLite/MySQL 的等价实测仍走 `verify-minimal-deployment.mjs`（2026-10-25）
 - [ ] 灰度升级流程（先旁路，再 new-api）

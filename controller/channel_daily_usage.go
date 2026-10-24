@@ -23,7 +23,12 @@ func channelDailyUsageSnapshot(channel *model.Channel) gin.H {
 		"tokens_used":         common.GetChannelDailyTokenUsage(channel.Id),
 		"daily_request_limit": setting.DailyRequestLimit,
 		"requests_used":       common.GetChannelDailyRequestUsage(channel.Id),
-		"rejects_today":       common.GetChannelDailyRejectUsage(channel.Id),
+		// A blocked request makes multiple channel-selection attempts (measured: 2
+		// and each attempt that finds this channel over budget counts once. The
+		// field name says so, and retry_times is returned next to it so the
+		// number can be interpreted without guessing.
+		"reject_selection_attempts_today": common.GetChannelDailyRejectUsage(channel.Id),
+		"retry_times":                     model.CurrentRequestPolicy().RetryTimes,
 	}
 }
 

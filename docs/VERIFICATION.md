@@ -330,7 +330,7 @@ SQLite 与 MySQL 的等价实测在 §4 的 `verify-minimal-deployment.mjs`（�
 | 计数落点 | 唯一决策点 `model.channelDailyLimitViolation`：缓存选路、候选集预筛、数据库选路都汇入这里，所以只加 1 处调用就覆盖三条路径，不需要动上游日志/错误处理 |
 | 计数器互不污染 | `TestChannelDailyRejectCounterDoesNotMoveUsage`：拒绝计数 2 次后 `tokens_used`/`requests_used` 仍为 0；id≤0 为 no-op（nil 渠道不会污染 key） |
 | 只读接口 | `GET /api/channel/daily_usage/:id` 与 `GET /api/channel/daily_usage`（`authz.ChannelRead`），返回限额 / 当日已用 / 当日被跳过次数，数据就是执行层正在读的那几个计数器，没有第二套真相 |
-| 端到端（0.3.0 镜像 + Postgres + Redis + mock 上游） | `node scripts/verify-daily-observability.mjs` **14/14**：预算 1 次请求的渠道第一次 200、第二次 **429 daily_request_limit_exceeded**；快照返回 `requests_used=1`、`rejects_today=2`、`daily_request_limit=1`；聚合列表含该渠道且 **payload 不含上游 key** |
-| 已知语义偏差 | `rejects_today` 是"**被跳过的评估次数**"而不是"被拒的请求数"：上面那次 429 记了 2（缓存路径里预筛与选后复检各记一次）。作为上界看是对的，要精确到请求数需要按 request id 去重——已记为后续项，不掩饰 |
+| 端到端（0.3.0 镜像 + Postgres + Redis + mock 上游） | `node scripts/verify-daily-observability.mjs`：预算 1 次请求的渠道第一次 200、第二次 **429 daily_request_limit_exceeded**；快照返回 `requests_used=1`、`reject_selection_attempts_today=2`、`daily_request_limit=1`；聚合列表含该渠道且 **payload 不含上游 key** |
+| "2 而不是 1"追到根因 | 不是重复计数：默认 `RetryTimes=0` 时一个被挡的请求会做 **2 次选路尝试**（同一请求在两行相同的 distributor `No available channel ... (distributor)` 错误日志里可见），每次尝试发现该渠道超额都计 1 次。字段因此改名为 `reject_selection_attempts_today`（单位是选路尝试），接口一并返回 `retry_times` 供参考。我最初推断倍率是 `retry_times+1`，harness 的断言把它证伪了（预测 1、实测 2），所以最终改成"钉住实测值 2、变了就红"而不是写公式——不要拿未验证的换算骗运维 |
 | 密钥卫生 | 聚合分支走 `GetAllChannels(0, -1, selectAll=false, ...)`，即 GORM `Omit("key")` 路径，密钥连内存都不加载；`Limit(-1)` 表示不分页而不是写死魔法数 |
 | 版本纪律 | 新增接口属内容变化 → `PRODUCT_VERSION` 0.2.0 → **0.3.0**，镜像重打为 `new-api-daily-limit:0.3.0` 与别名 `starbridge-gateway:0.3.0`（同一 tag 不覆盖内容）；`.gitattributes` 补 `PRODUCT_VERSION text eol=lf`，避免 Windows 检出 CRLF 把版本号读成带 `\r` 的 tag |

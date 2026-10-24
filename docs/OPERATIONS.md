@@ -139,8 +139,10 @@ curl -s -H "Authorization: Bearer <admin-token>" -H "New-Api-User: 1" \
   http://localhost:3800/api/channel/daily_usage          # 所有有预算或用量的渠道
 curl -s -H "Authorization: Bearer <admin-token>" -H "New-Api-User: 1" \
   http://localhost:3800/api/channel/daily_usage/<id>     # 单渠道：限额/已用/今日被跳过次数
-# rejects_today 是"被跳过的评估次数"上界（一次 429 可能记 2 次），用于发现"这条渠道今天被挡了多少"，
-# 不要当成 UV 级精确请求数；精确去重是后续项。
+# 计数字段叫 reject_selection_attempts_today，不是"被拒请求数"：一个被挡的请求会做
+# 默认配置实测一个被挡请求做 2 次选路尝试，每次发现该渠道超额都计 1 次。
+# 接口同时返回 retry_times 供参考，但不要用 retry_times+1 去换算请求数：那条推断已被实测证伪
+# （默认 RetryTimes=0 下一个被挡请求计 2 次）。要请求级数字请看该渠道的 429 出现次数。
 
 # 端到端门禁：需要 compose 栈在跑，外加 node scripts/mock-upstream.cjs
 node scripts/verify-daily-limit.mjs     # 日限额边界端到端（含无 Redis、出图不计 token 等形态）
