@@ -166,6 +166,18 @@ async function main() {
 
   await removeChannel(mock.id);
 
+  // Same cleanup convention as the other two harnesses: the token list endpoint
+  // is paginated ({page,page_size,total,items}), so resolve ids through
+  // keyword search and delete them, then re-check. Note the delete is a soft
+  // delete (tokens.deleted_at), so count live rows with deleted_at is null.
+  const tokenHits = await api(`/api/token/search?keyword=${encodeURIComponent(TOKEN_NAME)}`);
+  for (const stale of tokenHits.json.data?.items || []) {
+    if (stale?.name === TOKEN_NAME) await api(`/api/token/${stale.id}`, { method: 'DELETE' });
+  }
+  const tokenLeft = await api(`/api/token/search?keyword=${encodeURIComponent(TOKEN_NAME)}`);
+  const liveTokens = (tokenLeft.json.data?.items || []).filter((t) => t?.name === TOKEN_NAME);
+  record('token cleaned up', liveTokens.length === 0, `left=${liveTokens.length}`);
+
   const failed = results.filter((r) => !r.ok);
   console.log(`\n${results.length - failed.length}/${results.length} checks passed`);
   if (failed.length) {

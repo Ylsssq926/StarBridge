@@ -144,6 +144,10 @@ curl -s -H "Authorization: Bearer <admin-token>" -H "New-Api-User: 1" \
 # 接口同时返回 retry_times 供参考，但不要用 retry_times+1 去换算请求数：那条推断已被实测证伪
 # （默认 RetryTimes=0 下一个被挡请求计 2 次）。要请求级数字请看该渠道的 429 出现次数。
 
+# harness 收尾约定（三个常驻栈上的脚本都遵守）：跑完把自己造的渠道和 token 删掉。
+# token 列表接口是分页的 {page,page_size,total,items}，所以要先 /api/token/search?keyword=
+# 拿 id 再 DELETE /api/token/:id；注意那是软删除（tokens.deleted_at），数活着的行要加
+# deleted_at is null，否则会把墓碑当成泄漏。
 # 端到端门禁：需要 compose 栈在跑，外加 node scripts/mock-upstream.cjs
 node scripts/verify-daily-limit.mjs     # 日限额边界端到端（含无 Redis、出图不计 token 等形态）
 node scripts/verify-compat.mjs          # 协议/接线
