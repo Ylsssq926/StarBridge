@@ -325,6 +325,10 @@ cmd_apply() {
         git apply --3way "$ROOT/$patch"
       done
     fi
+    # Attributes introduced by a later commit do not retroactively convert files
+    # that earlier commits already wrote, so a replayed worktree can end up with
+    # CRLF scripts. Rewrite the working tree under the final rules.
+    git ls-files -z | git checkout-index -f -z
   ) || {
     echo "replay failed; resolve in: $target" >&2
     echo "  series mode: git am --abort to back out, or USE_SERIES=0 for file patches" >&2
