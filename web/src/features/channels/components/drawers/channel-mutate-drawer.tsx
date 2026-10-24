@@ -299,6 +299,7 @@ const SENSITIVE_FORM_FIELDS = [
   'force_format',
   'thinking_to_content',
   'daily_token_limit',
+  'daily_request_limit',
   'proxy',
   'http_protocol',
   'http2_connection_shards',
@@ -1798,13 +1799,17 @@ export function ChannelMutateDrawer({
     [onOpenChange, form, isSubmitting, showProviderPicker, providerTarget]
   )
 
-  const dailyTokenLimitFields = (
+  const dailyLimitField = (
+    name: 'daily_token_limit' | 'daily_request_limit',
+    label: string,
+    description: string
+  ) => (
     <FormField
       control={form.control}
-      name='daily_token_limit'
+      name={name}
       render={({ field }) => (
         <FormItem>
-          <FormLabel>{t('Daily Token Limit')}</FormLabel>
+          <FormLabel>{t(label)}</FormLabel>
           <FormControl>
             <Input
               type='number'
@@ -1818,15 +1823,26 @@ export function ChannelMutateDrawer({
               }
             />
           </FormControl>
-          <FormDescription>
-            {t(
-              'Maximum billable input + output tokens per channel per day. 0 means unlimited.'
-            )}
-          </FormDescription>
+          <FormDescription>{t(description)}</FormDescription>
           <FormMessage />
         </FormItem>
       )}
     />
+  )
+
+  const dailyTokenLimitFields = (
+    <>
+      {dailyLimitField(
+        'daily_token_limit',
+        'Daily Token Limit',
+        'Maximum billable input + output tokens per channel per day. 0 means unlimited.'
+      )}
+      {dailyLimitField(
+        'daily_request_limit',
+        'Daily Request Limit',
+        'Maximum billable requests per channel per day. Unlike the token budget this also counts image, video and other per-call tasks that report no usage. 0 means unlimited.'
+      )}
+    </>
   )
 
   const proxyFields = (

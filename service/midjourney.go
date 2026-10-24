@@ -89,6 +89,11 @@ func SettleMidjourneyTaskBilling(relayInfo *relaycommon.RelayInfo, task *model.M
 	if updateErr := task.UpdateBillingState(); updateErr != nil {
 		return true, errors.Join(billingErr, fmt.Errorf("update Midjourney billing state: %w", updateErr))
 	}
+	// A billed legacy task consumes the upstream account once, so it counts
+	// against the channel's per-day request budget like every other task.
+	if err := IncreaseChannelDailyRequestUsage(task.BillingChannelId); err != nil {
+		common.SysError(err.Error())
+	}
 	return true, billingErr
 }
 

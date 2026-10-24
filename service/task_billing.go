@@ -90,6 +90,12 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo, task *model
 	})
 	model.UpdateUserUsedQuotaAndRequestCount(info.UserId, info.PriceData.Quota)
 	model.UpdateChannelUsedQuota(info.ChannelId, info.PriceData.Quota)
+	// The upstream account is consumed the moment the task is accepted, so the
+	// per-day request budget is charged here rather than at settlement: async
+	// image/video tasks never report token usage.
+	if err := IncreaseChannelDailyRequestUsage(info.ChannelId); err != nil {
+		logger.LogError(c, common.LogText("channel daily request usage not recorded: %s", err.Error()))
+	}
 }
 
 // ---------------------------------------------------------------------------

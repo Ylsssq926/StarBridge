@@ -11,125 +11,182 @@ import (
 	"github.com/go-redis/redis/v8"
 )
 
+// channelDailyMetric names one per-day usage counter maintained per channel.
+// Two metrics are tracked because they cover different upstream realities:
+// tokens for text relay, requests for async tasks and per-call priced work.
+type channelDailyMetric struct {
+	name          string // fallback-key namespace and log wording
+	keyFmt        string // Redis key format: channel id, then date
+	redisDisabled string // one-shot warning text
+}
+
 var (
-	channelDailyTokenFallbackMu          sync.Mutex
-	channelDailyTokenFallbackUsage       = map[string]int64{}
-	channelDailyTokenFallbackCleanupOnce sync.Once
-	channelDailyTokenFallbackLogOnce     sync.Once
+	channelDailyTokenMetric = channelDailyMetric{
+		name:          "tokens",
+		keyFmt:        constant.ChannelDailyTokenUsageKeyFmt,
+		redisDisabled: "Redis is disabled; channel daily token usage falls back to in-process memory and is not consistent across multiple instances",
+	}
+	channelDailyRequestMetric = channelDailyMetric{
+		name:          "requests",
+		keyFmt:        constant.ChannelDailyRequestUsageKeyFmt,
+		redisDisabled: "Redis is disabled; channel daily request usage falls back to in-process memory and is not consistent across multiple instances",
+	}
 )
 
-func channelDailyTokenDate(t time.Time) string {
+var (
+	channelDailyFallbackMu       sync.Mutex
+	channelDailyFallbackUsage    = map[string]int64{}
+	channelDailyFallbackCleanup  sync.Once
+	channelDailyRedisDisabledLog sync.Map // metric name -> bool
+)
+
+func channelDailyDate(t time.Time) string {
 	return t.Format("20060102")
 }
 
-func channelDailyTokenNextMidnight(t time.Time) time.Time {
+func channelDailyNextMidnight(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day()+1, 0, 0, 0, 0, t.Location())
 }
 
-func channelDailyTokenRedisKey(channelID int, t time.Time) string {
-	return fmt.Sprintf(constant.ChannelDailyTokenUsageKeyFmt, channelID, channelDailyTokenDate(t))
+func channelDailyRedisKey(metric channelDailyMetric, channelID int, t time.Time) string {
+	return fmt.Sprintf(metric.keyFmt, channelID, channelDailyDate(t))
 }
 
-func channelDailyTokenFallbackKey(channelID int, t time.Time) string {
-	return fmt.Sprintf("%d:%s", channelID, channelDailyTokenDate(t))
+func channelDailyFallbackKey(metric channelDailyMetric, channelID int, t time.Time) string {
+	return fmt.Sprintf("%s:%d:%s", metric.name, channelID, channelDailyDate(t))
 }
 
-func logChannelDailyTokenFallbackRedisDisabled() {
-	channelDailyTokenFallbackLogOnce.Do(func() {
-		SysLog(LogText("Redis is disabled; channel daily token usage falls back to in-process memory and is not consistent across multiple instances"))
-	})
+func logChannelDailyRedisDisabled(metric channelDailyMetric) {
+	if _, loaded := channelDailyRedisDisabledLog.LoadOrStore(metric.name, true); loaded {
+		return
+	}
+	SysLog(metric.redisDisabled)
 }
 
-func startChannelDailyTokenFallbackCleanup() {
-	channelDailyTokenFallbackCleanupOnce.Do(func() {
+func startChannelDailyFallbackCleanup() {
+	channelDailyFallbackCleanup.Do(func() {
 		go func() {
 			ticker := time.NewTicker(time.Minute)
 			defer ticker.Stop()
 			for range ticker.C {
-				currentDate := channelDailyTokenDate(time.Now())
-				channelDailyTokenFallbackMu.Lock()
-				for key := range channelDailyTokenFallbackUsage {
+				currentDate := channelDailyDate(time.Now())
+				channelDailyFallbackMu.Lock()
+				for key := range channelDailyFallbackUsage {
 					if len(key) < len(currentDate) || key[len(key)-len(currentDate):] != currentDate {
-						delete(channelDailyTokenFallbackUsage, key)
+						delete(channelDailyFallbackUsage, key)
 					}
 				}
-				channelDailyTokenFallbackMu.Unlock()
+				channelDailyFallbackMu.Unlock()
 			}
 		}()
 	})
 }
 
-func getChannelDailyTokenFallbackUsage(channelID int, now time.Time) int64 {
-	key := channelDailyTokenFallbackKey(channelID, now)
-	channelDailyTokenFallbackMu.Lock()
-	defer channelDailyTokenFallbackMu.Unlock()
-	return channelDailyTokenFallbackUsage[key]
+func getChannelDailyFallbackUsage(metric channelDailyMetric, channelID int, now time.Time) int64 {
+	key := channelDailyFallbackKey(metric, channelID, now)
+	channelDailyFallbackMu.Lock()
+	defer channelDailyFallbackMu.Unlock()
+	return channelDailyFallbackUsage[key]
 }
 
-func addChannelDailyTokenFallbackUsage(channelID int, tokens int64, now time.Time) {
-	key := channelDailyTokenFallbackKey(channelID, now)
-	channelDailyTokenFallbackMu.Lock()
-	channelDailyTokenFallbackUsage[key] += tokens
-	channelDailyTokenFallbackMu.Unlock()
+func addChannelDailyFallbackUsage(metric channelDailyMetric, channelID int, delta int64, now time.Time) {
+	key := channelDailyFallbackKey(metric, channelID, now)
+	channelDailyFallbackMu.Lock()
+	channelDailyFallbackUsage[key] += delta
+	channelDailyFallbackMu.Unlock()
 }
 
-// GetChannelDailyTokenUsage returns today's billable token usage for a channel.
-func GetChannelDailyTokenUsage(channelID int) int64 {
+// getChannelDailyUsage returns today's usage for a metric. Usage written while
+// Redis was unavailable is kept in-process and added to the Redis value, so a
+// Redis outage never resets a channel's day.
+func getChannelDailyUsage(metric channelDailyMetric, channelID int) int64 {
 	now := time.Now()
-	fallbackUsage := getChannelDailyTokenFallbackUsage(channelID, now)
+	fallbackUsage := getChannelDailyFallbackUsage(metric, channelID, now)
 	if RedisEnabled && RDB != nil {
-		value, err := RedisGet(channelDailyTokenRedisKey(channelID, now))
+		value, err := RedisGet(channelDailyRedisKey(metric, channelID, now))
 		if errors.Is(err, redis.Nil) {
 			return fallbackUsage
 		}
 		if err != nil {
-			SysError(fmt.Sprintf("failed to get channel daily token usage from Redis: channel_id=%d, error=%v", channelID, err))
+			SysError(fmt.Sprintf("failed to get channel daily %s usage from Redis: channel_id=%d, error=%v", metric.name, channelID, err))
 			return fallbackUsage
 		}
 		usage, err := strconv.ParseInt(value, 10, 64)
 		if err != nil {
-			SysError(fmt.Sprintf("failed to parse channel daily token usage: channel_id=%d, value=%s, error=%v", channelID, value, err))
+			SysError(fmt.Sprintf("failed to parse channel daily %s usage: channel_id=%d, value=%s, error=%v", metric.name, channelID, value, err))
 			return fallbackUsage
 		}
 		return usage + fallbackUsage
 	}
 
-	logChannelDailyTokenFallbackRedisDisabled()
-	startChannelDailyTokenFallbackCleanup()
+	logChannelDailyRedisDisabled(metric)
+	startChannelDailyFallbackCleanup()
 	return fallbackUsage
 }
 
-// IsChannelDailyTokenUsageAvailable reports whether the channel may serve
-// another request today. A non-positive limit means unlimited.
-func IsChannelDailyTokenUsageAvailable(channelID int, limit int64) bool {
-	if limit <= 0 {
-		return true
-	}
-	return GetChannelDailyTokenUsage(channelID) < limit
-}
-
-// IncreaseChannelDailyTokenUsage records billable usage for the current day.
-func IncreaseChannelDailyTokenUsage(channelID int, tokens int64) error {
-	if channelID <= 0 || tokens <= 0 {
+// increaseChannelDailyUsage records usage for the current day. It returns the
+// Redis error when the shared counter could not be written; the in-process
+// fallback is always applied so a single instance still enforces the cap.
+func increaseChannelDailyUsage(metric channelDailyMetric, channelID int, delta int64) error {
+	if channelID <= 0 || delta <= 0 {
 		return nil
 	}
 
 	now := time.Now()
 	if RedisEnabled && RDB != nil {
-		expireAt := channelDailyTokenNextMidnight(now)
-		_, err := RedisIncrByWithExpireAt(channelDailyTokenRedisKey(channelID, now), tokens, expireAt)
+		expireAt := channelDailyNextMidnight(now)
+		_, err := RedisIncrByWithExpireAt(channelDailyRedisKey(metric, channelID, now), delta, expireAt)
 		if err != nil {
-			startChannelDailyTokenFallbackCleanup()
-			addChannelDailyTokenFallbackUsage(channelID, tokens, now)
-			fallbackErr := fmt.Errorf("channel daily token usage NOT recorded in Redis, daily limit may not take effect across instances: channel_id=%d, tokens=%d, error=%w", channelID, tokens, err)
+			startChannelDailyFallbackCleanup()
+			addChannelDailyFallbackUsage(metric, channelID, delta, now)
+			fallbackErr := fmt.Errorf("channel daily %s usage NOT recorded in Redis, daily limit may not take effect across instances: channel_id=%d, delta=%d, error=%w", metric.name, channelID, delta, err)
 			SysError(fallbackErr.Error())
 			return fallbackErr
 		}
 		return nil
 	}
 
-	logChannelDailyTokenFallbackRedisDisabled()
-	startChannelDailyTokenFallbackCleanup()
-	addChannelDailyTokenFallbackUsage(channelID, tokens, now)
+	logChannelDailyRedisDisabled(metric)
+	startChannelDailyFallbackCleanup()
+	addChannelDailyFallbackUsage(metric, channelID, delta, now)
 	return nil
+}
+
+func isChannelDailyUsageAvailable(metric channelDailyMetric, channelID int, limit int64) bool {
+	if limit <= 0 {
+		return true
+	}
+	return getChannelDailyUsage(metric, channelID) < limit
+}
+
+// GetChannelDailyTokenUsage returns today's billable token usage for a channel.
+func GetChannelDailyTokenUsage(channelID int) int64 {
+	return getChannelDailyUsage(channelDailyTokenMetric, channelID)
+}
+
+// IsChannelDailyTokenUsageAvailable reports whether the channel may still serve
+// tokens today. A non-positive limit means unlimited.
+func IsChannelDailyTokenUsageAvailable(channelID int, limit int64) bool {
+	return isChannelDailyUsageAvailable(channelDailyTokenMetric, channelID, limit)
+}
+
+// IncreaseChannelDailyTokenUsage records billable tokens for the current day.
+func IncreaseChannelDailyTokenUsage(channelID int, tokens int64) error {
+	return increaseChannelDailyUsage(channelDailyTokenMetric, channelID, tokens)
+}
+
+// GetChannelDailyRequestUsage returns today's billable request count for a channel.
+func GetChannelDailyRequestUsage(channelID int) int64 {
+	return getChannelDailyUsage(channelDailyRequestMetric, channelID)
+}
+
+// IsChannelDailyRequestUsageAvailable reports whether the channel may still take
+// requests today. A non-positive limit means unlimited.
+func IsChannelDailyRequestUsageAvailable(channelID int, limit int64) bool {
+	return isChannelDailyUsageAvailable(channelDailyRequestMetric, channelID, limit)
+}
+
+// IncreaseChannelDailyRequestUsage records one billable request for the current day.
+func IncreaseChannelDailyRequestUsage(channelID int) error {
+	return increaseChannelDailyUsage(channelDailyRequestMetric, channelID, 1)
 }

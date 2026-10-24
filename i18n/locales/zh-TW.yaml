@@ -27,6 +27,7 @@ distributor.get_channel_failed: "獲取分組 {{.Group}} 下模型 {{.Model}} �
 distributor.no_available_channel: "分組 {{.Group}} 下模型 {{.Model}} 無可用管道（distributor）"
 distributor.no_available_channel_task_plugin: "分組 {{.Group}} 下模型 {{.Model}} 無可用管道：該模型由任務插件認領，但目前沒有啟用的管道可服務此模型（distributor）"
 distributor.channel_daily_token_limit_exceeded: "分組 {{.Group}} 下模型 {{.Model}} 無可用管道：所有候選管道均已達到每日 Token 限額"
+distributor.channel_daily_request_limit_exceeded: "分組 {{.Group}} 下模型 {{.Model}} 無可用管道：所有候選管道均已達到每日請求數限額"
 distributor.invalid_request_parse_model: "無法解析模型"
 quota.user_insufficient: "使用者額度不足，剩餘額度：{{.Remaining}}"
 quota.pre_consume_insufficient: "預扣費額度失敗，使用者剩餘額度：{{.Remaining}}，需要預扣費額度：{{.Required}}"

@@ -4,6 +4,10 @@ const BASE = process.argv[2] || 'http://localhost:3800';
 const ADMIN_USER = process.env.NEW_API_ADMIN_USER || 'root';
 const ADMIN_PASS = process.env.NEW_API_ADMIN_PASS || 'rootpass123';
 const CHANNEL_NAME = 'verify-daily-limit';
+const IMAGE_CHANNEL_NAME = 'verify-request-limit-image';
+const REQUEST_CHANNEL_NAME = 'verify-request-limit-text';
+const IMAGE_MODEL = 'verify-image-model';
+const REQUEST_MODEL = 'verify-request-model';
 const TOKEN_NAME = 'verify-daily-limit';
 const MODEL = 'mock-model';
 
@@ -64,6 +68,53 @@ function waitCache() {
   return new Promise((r) => setTimeout(r, 7000));
 }
 
+async function createChannel(name, model, setting) {
+  await api('/api/channel/', {
+    method: 'POST',
+    body: {
+      mode: 'single',
+      channel: {
+        name,
+        type: 1,
+        base_url: 'http://host.docker.internal:3999',
+        key: 'mock-key',
+        models: model,
+        group: 'default',
+        priority: 0,
+        weight: 0,
+        status: 1,
+        setting: JSON.stringify(setting),
+      },
+    },
+  });
+  const items = await listChannels();
+  return items.find((c) => c.name === name) || null;
+}
+
+async function relayModel(path, key, model, payload) {
+  const res = await fetch(`${BASE}${path}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer sk-${key}` },
+    body: JSON.stringify(payload),
+  });
+  const text = await res.text();
+  let code = '';
+  try {
+    code = JSON.parse(text)?.error?.code || '';
+  } catch {
+    /* keep empty */
+  }
+  return { status: res.status, code, body: text.slice(0, 160) };
+}
+
+async function relayChat(key, model) {
+  return relayModel('/v1/chat/completions', key, model, { model, messages: [{ role: 'user', content: 'hi' }] });
+}
+
+async function relayImage(key, model) {
+  return relayModel('/v1/images/generations', key, model, { model, prompt: 'a cat', n: 1 });
+}
+
 async function listChannels() {
   const list = await api('/api/channel/');
   const d = list.json.data;
@@ -116,7 +167,10 @@ async function main() {
   // model_price_error before channel selection happens.
   const priced = await api('/api/option/', {
     method: 'PUT',
-    body: { key: 'ModelPrice', value: JSON.stringify({ [MODEL]: 0.01 }) },
+    body: {
+      key: 'ModelPrice',
+      value: JSON.stringify({ [MODEL]: 0.01, [IMAGE_MODEL]: 0.01, [REQUEST_MODEL]: 0.01 }),
+    },
   });
   record('model price configured', priced.json.success === true, 'option=ModelPrice');
 
@@ -190,10 +244,51 @@ async function main() {
   const raised = await relay(apiKey, 'raised');
   record('raise cap unblocks within cache sync', raised.status === 200, `status=${raised.status} body=${raised.body.slice(0, 80)}`);
 
+  // Case 5: image generation is billed per call and reports no tokens at all,
+  // so only the request budget can hold an account-type image channel.
+  const imageChannel = await createChannel(IMAGE_CHANNEL_NAME, IMAGE_MODEL, { daily_request_limit: 1 });
+  if (!imageChannel) {
+    record('image channel created', false, 'create returned nothing');
+  } else {
+    record('image channel created', true, `id=${imageChannel.id}`);
+    await waitCache();
+    const image1 = await relayImage(apiKey, IMAGE_MODEL);
+    await new Promise((r) => setTimeout(r, 2000));
+    const image2 = await relayImage(apiKey, IMAGE_MODEL);
+    record(
+      'no-token image request blocked by request budget',
+      image1.status === 200 && image2.status === 429 && image2.code === 'channel:daily_request_limit_exceeded',
+      `first=${image1.status} second=${image2.status} code=${image2.code || '-'}`
+    );
+
+    // Case 6: dropping the request budget restores service even with no token budget.
+    await api('/api/channel/', { method: 'PUT', body: { id: imageChannel.id, setting: '{}' } });
+    await waitCache();
+    const image3 = await relayImage(apiKey, IMAGE_MODEL);
+    record('clearing request budget restores image channel', image3.status === 200, `status=${image3.status}`);
+  }
+
+  // Case 7: the text path counts requests too, independently of tokens.
+  const requestChannel = await createChannel(REQUEST_CHANNEL_NAME, REQUEST_MODEL, { daily_request_limit: 2 });
+  if (requestChannel) {
+    await waitCache();
+    const t1 = await relayChat(apiKey, REQUEST_MODEL);
+    const t2 = await relayChat(apiKey, REQUEST_MODEL);
+    await new Promise((r) => setTimeout(r, 2000));
+    const t3 = await relayChat(apiKey, REQUEST_MODEL);
+    record(
+      'text requests counted against request budget',
+      t1.status === 200 && t2.status === 200 && t3.status === 429 && t3.code === 'channel:daily_request_limit_exceeded',
+      `statuses=${t1.status}/${t2.status}/${t3.status} code=${t3.code || '-'}`
+    );
+  } else {
+    record('text request-budget channel created', false, 'create returned nothing');
+  }
+
   const cleanup = await api(`/api/channel/${channel.id}`, { method: 'DELETE' });
   record('cleanup channel deleted', cleanup.json.success === true, JSON.stringify(cleanup.json).slice(0, 80));
   for (const stray of await listChannels()) {
-    if (stray.name === 'price-probe' || stray.name === CHANNEL_NAME) {
+    if (['price-probe', CHANNEL_NAME, IMAGE_CHANNEL_NAME, REQUEST_CHANNEL_NAME].includes(stray.name)) {
       await api(`/api/channel/${stray.id}`, { method: 'DELETE' });
     }
   }

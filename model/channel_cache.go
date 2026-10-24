@@ -130,20 +130,23 @@ func GetRandomSatisfiedChannel(
 
 	// First, try to find channels with the exact model name.
 	channels, emptiedBy := filterCandidateIDs(group2model2channels[group][model], model, filters)
-	dailyLimited := len(channels) == 0 && emptiedBy == dto.FilterDailyTokenLimit
+	var dailyEmptiedBy dto.ChannelFilterKind
+	if len(channels) == 0 && IsDailyLimitKind(emptiedBy) {
+		dailyEmptiedBy = emptiedBy
+	}
 
 	// If no channels found, try to find channels with the normalized model name.
 	if len(channels) == 0 {
 		normalizedModel := ratio_setting.RoutingMatchModelName(model)
 		channels, emptiedBy = filterCandidateIDs(group2model2channels[group][normalizedModel], model, filters)
-		if len(channels) == 0 && emptiedBy == dto.FilterDailyTokenLimit {
-			dailyLimited = true
+		if len(channels) == 0 && IsDailyLimitKind(emptiedBy) && dailyEmptiedBy == "" {
+			dailyEmptiedBy = emptiedBy
 		}
 	}
 
 	if len(channels) == 0 {
-		if dailyLimited {
-			return nil, ErrChannelDailyTokenLimit
+		if dailyEmptiedBy != "" {
+			return nil, DailyLimitSentinel(dailyEmptiedBy)
 		}
 		return nil, nil
 	}

@@ -87,6 +87,7 @@ const CONFIGURATION_BLOCKS = {
       'tls_insecure_skip_verify',
       'disable_task_polling_sleep',
       'daily_token_limit',
+      'daily_request_limit',
     ],
   },
   upstreamModelDetection: {
@@ -179,7 +180,8 @@ export function getChannelConfigurationState(
       (values.http2_connection_shards ?? 1) > 1 ||
       values.tls_insecure_skip_verify ||
       values.disable_task_polling_sleep ||
-      (values.daily_token_limit ?? 0) > 0
+      (values.daily_token_limit ?? 0) > 0 ||
+      (values.daily_request_limit ?? 0) > 0
     ),
     upstreamModelDetection:
       MODEL_FETCHABLE_TYPES.has(values.type) &&

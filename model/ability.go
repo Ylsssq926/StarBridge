@@ -117,7 +117,10 @@ func GetChannel(
 		return nil, err
 	}
 	abilities, emptiedBy := filterAbilitiesByConstraints(abilities, model, filters)
-	dailyLimited := len(abilities) == 0 && emptiedBy == dto.FilterDailyTokenLimit
+	var dailyEmptiedBy dto.ChannelFilterKind
+	if len(abilities) == 0 && IsDailyLimitKind(emptiedBy) {
+		dailyEmptiedBy = emptiedBy
+	}
 	// Like the memory cache, retry with the routing name (for example without
 	// @ modifiers) when no channel serves the exact name.
 	if normalized := ratio_setting.RoutingMatchModelName(model); len(abilities) == 0 && normalized != "" && normalized != model {
@@ -126,8 +129,8 @@ func GetChannel(
 			return nil, err
 		}
 		abilities, emptiedBy = filterAbilitiesByConstraints(abilities, model, filters)
-		if len(abilities) == 0 && emptiedBy == dto.FilterDailyTokenLimit {
-			dailyLimited = true
+		if len(abilities) == 0 && IsDailyLimitKind(emptiedBy) && dailyEmptiedBy == "" {
+			dailyEmptiedBy = emptiedBy
 		}
 	}
 	if len(abilities) > 0 {
@@ -170,8 +173,8 @@ func GetChannel(
 			}
 		}
 	} else {
-		if dailyLimited {
-			return nil, ErrChannelDailyTokenLimit
+		if dailyEmptiedBy != "" {
+			return nil, DailyLimitSentinel(dailyEmptiedBy)
 		}
 		return nil, nil
 	}
@@ -213,6 +216,7 @@ func filterAbilitiesByConstraints(abilities []Ability, modelName string, filters
 	filtered := make([]Ability, 0, len(abilities))
 	dailyLimited := 0
 	otherFiltered := 0
+	var dailyKind dto.ChannelFilterKind
 	for _, ability := range abilities {
 		channel := channelsByID[ability.ChannelId]
 		ok, kind := ChannelSatisfiesFilters(channel, modelName, filters)
@@ -220,14 +224,17 @@ func filterAbilitiesByConstraints(abilities []Ability, modelName string, filters
 			filtered = append(filtered, ability)
 			continue
 		}
-		if kind == dto.FilterDailyTokenLimit {
+		if IsDailyLimitKind(kind) {
 			dailyLimited++
+			if dailyKind == "" {
+				dailyKind = kind
+			}
 		} else {
 			otherFiltered++
 		}
 	}
 	if len(filtered) == 0 && dailyLimited > 0 && otherFiltered == 0 {
-		return filtered, dto.FilterDailyTokenLimit
+		return filtered, dailyKind
 	}
 	return filtered, ""
 }

@@ -6321,6 +6321,8 @@
     "Daily Token Limit": "Суточный лимит токенов",
     "0 means unlimited": "0 означает без ограничений",
     "Maximum billable input + output tokens per channel per day. 0 means unlimited.": "Максимум оплачиваемых входных и выходных токенов на канал в день. 0 означает без ограничений.",
+    "Daily Request Limit": "Суточный лимит запросов",
+    "Maximum billable requests per channel per day. Unlike the token budget this also counts image, video and other per-call tasks that report no usage. 0 means unlimited.": "Максимум оплачиваемых запросов на канал в день. В отличие от лимита токенов, сюда также входят задачи генерации изображений и видео с оплатой за запрос, которые не возвращают объем использования. 0 означает без ограничений.",
     "Thinking...": "Размышление...",
     "Third-party": "Сторонний",
     "Third-party — use at your own risk": "Сторонний — на ваш риск",

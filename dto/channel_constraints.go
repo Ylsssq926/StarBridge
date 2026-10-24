@@ -41,6 +41,7 @@ const (
 	FilterTaskPluginIdentity ChannelFilterKind = "task_plugin_identity"
 	FilterResponsesWebSocket ChannelFilterKind = "responses_websocket"
 	FilterDailyTokenLimit    ChannelFilterKind = "daily_token_limit"
+	FilterDailyRequestLimit  ChannelFilterKind = "daily_request_limit"
 )
 
 type ChannelFilter struct {

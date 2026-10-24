@@ -467,6 +467,9 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		if err := IncreaseChannelDailyTokenUsage(relayInfo.ChannelId, int64(summary.PromptTokens+summary.CompletionTokens)); err != nil {
 			logger.LogError(ctx, common.LogText("channel daily token usage not recorded: %s", err.Error()))
 		}
+		if err := IncreaseChannelDailyRequestUsage(relayInfo.ChannelId); err != nil {
+			logger.LogError(ctx, common.LogText("channel daily request usage not recorded: %s", err.Error()))
+		}
 	}
 
 	if err := SettleBilling(ctx, relayInfo, summary.Quota); err != nil {

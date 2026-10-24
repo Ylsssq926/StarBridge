@@ -38,6 +38,11 @@ type ChannelSettings struct {
 	// DailyTokenLimit caps billable input + output tokens per channel per local
 	// day. Zero or negative means unlimited.
 	DailyTokenLimit int64 `json:"daily_token_limit,omitempty"`
+	// DailyRequestLimit caps billable requests per channel per local day. It is
+	// orthogonal to DailyTokenLimit: async image/video tasks and per-call priced
+	// requests report no tokens, so they never move the token counter, but they
+	// do consume the upstream account once each. Zero or negative means unlimited.
+	DailyRequestLimit int64 `json:"daily_request_limit,omitempty"`
 }
 
 // BindsTaskPlugin reports whether the channel is bound to the task plugin,

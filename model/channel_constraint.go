@@ -7,8 +7,11 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 )
 
+// filterEvalOrder lists the request-driven filters. The per-day budgets are not
+// in this list: they belong to the channel rather than to the request, so they
+// are evaluated separately before these filters. Keeping them out also shrinks
+// the upstream conflict surface of this slice.
 var filterEvalOrder = []dto.ChannelFilterKind{
-	dto.FilterDailyTokenLimit,
 	dto.FilterRequestPath,
 	dto.FilterTaskPluginEndpoint,
 	dto.FilterTaskPluginIdentity,
@@ -16,19 +19,17 @@ var filterEvalOrder = []dto.ChannelFilterKind{
 }
 
 // ChannelSatisfiesFilters reports whether ch passes every filter.
-// On false, it returns the first violated filter in filterEvalOrder for error
-// attribution.
+// On false, it returns the first violated filter kind for error attribution:
+// the per-day budgets are checked before filterEvalOrder, so this is not always
+// the first entry of that slice.
 func ChannelSatisfiesFilters(ch *Channel, modelName string, filters []dto.ChannelFilter) (bool, dto.ChannelFilterKind) {
 	if ch == nil {
 		return false, ""
 	}
+	if kind := channelDailyLimitViolation(ch); kind != "" {
+		return false, kind
+	}
 	for _, kind := range filterEvalOrder {
-		if kind == dto.FilterDailyTokenLimit {
-			if !channelWithinDailyTokenLimit(ch) {
-				return false, kind
-			}
-			continue
-		}
 		for _, filter := range filters {
 			if filter.Kind != kind {
 				continue
@@ -49,24 +50,31 @@ func filterCandidateIDs(ids []int, modelName string, filters []dto.ChannelFilter
 	if len(ids) == 0 {
 		return ids, ""
 	}
-	kept = ids
-	for _, kind := range filterEvalOrder {
-		if kind == dto.FilterDailyTokenLimit {
-			next := make([]int, 0, len(kept))
-			for _, id := range kept {
-				channel, exists := channelsIDM[id]
-				// Preserve missing ids so the downstream consistency error is
-				// still reported instead of being masked by the daily cap.
-				if !exists || channelWithinDailyTokenLimit(channel) {
-					next = append(next, id)
-				}
-			}
-			if len(kept) > 0 && len(next) == 0 {
-				return next, kind
-			}
-			kept = next
+	// Per-day budgets first: they are channel-owned, so a channel that is full
+	// for today must not be chosen even when it matches every request filter.
+	dailyKept := make([]int, 0, len(ids))
+	var dailyKind dto.ChannelFilterKind
+	for _, id := range ids {
+		channel, exists := channelsIDM[id]
+		// Preserve missing ids so the downstream consistency error is
+		// still reported instead of being masked by the daily cap.
+		if !exists {
+			dailyKept = append(dailyKept, id)
 			continue
 		}
+		if kind := channelDailyLimitViolation(channel); kind != "" {
+			if dailyKind == "" {
+				dailyKind = kind
+			}
+			continue
+		}
+		dailyKept = append(dailyKept, id)
+	}
+	if len(ids) > 0 && len(dailyKept) == 0 {
+		return dailyKept, dailyKind
+	}
+	kept = dailyKept
+	for _, kind := range filterEvalOrder {
 		kindFilters := filtersByKind(filters, kind)
 		if len(kindFilters) == 0 {
 			continue
@@ -147,6 +155,8 @@ func channelMatchesFilter(ch *Channel, modelName string, filter dto.ChannelFilte
 		return ch.Type != constant.ChannelTypeTaskPlugin || pluginChannel
 	case dto.FilterDailyTokenLimit:
 		return channelWithinDailyTokenLimit(ch)
+	case dto.FilterDailyRequestLimit:
+		return channelWithinDailyRequestLimit(ch)
 	case dto.FilterResponsesWebSocket:
 		if !ch.GetSetting().ResponsesWebSocketEnabled {
 			return false
