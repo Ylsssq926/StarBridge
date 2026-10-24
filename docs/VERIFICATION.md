@@ -233,7 +233,23 @@ rm docker-compose.poc.override.yml
 ./scripts/upstream-sync.sh check ../new-api-v1.0.0-rc.47
 ```
 
-## 12. 分支化与上游跟进机制加固（本轮）
+## 12. 文档主张 vs 证据审计
+
+对 `PRODUCT.md` / `docs/OPERATIONS.md` 逐条核对，凡是写进文档的说法都要有实测或源码依据。本轮挑出并修掉 7 处：
+
+| 主张 | 审计结果 |
+|---|---|
+| "建完渠道马上 503，等 5~10s" | 措辞含糊 → 实测成数字：立即请求 503 `model_not_found`，等 7s 同一请求 200 |
+| "次日零点自动重置" | 请求数计数器实测 TTL 85079s（当天 00:22 时），确为容器本地时区零点 |
+| 面板地图（页面清单与职责） | 原表按记忆写，缺 `/profile`、`/usage-logs/audit`、`/chat`、`/rankings`；`/models`、`/system-settings/operations`、`/security` 的分节名与源码 `section-registry.tsx` 不一致 → 按路由与分节 id 重写 |
+| "速率限制"与日限额的关系 | 文档没区分：上游内置的是速率限制（多快），本项目新增的是当日总量（多少）→ 明确写进表里 |
+| "AIClient2API 控制台可加 Kiro/Antigravity" | 根 HTML 里搜不到 provider（SPA），改以容器内 `src/ui-modules/provider-api.js`、`oauth-api.js` 含相关模块为证 |
+| 镜像内含许可证 | 在 0.2.0 容器内确认 `/licenses/{LICENSE,NOTICE,THIRD-PARTY-LICENSES.md}`，`/new-api --version` → `0.2.0` |
+| "私有补丁约 500 行"、"成品显示 0.1.0" | 数字过期 → 按 `git diff` 实测改写 |
+
+未能用实测支撑、已改为明确标注外部依赖的说法：真实 Kiro/Antigravity 账号调用、真实国内厂商 Key 与出图（见 §10）。
+
+## 13. 分支化与同步机制加固（分轮记录）
 
 | 验证 | 结果 |
 |---|---|

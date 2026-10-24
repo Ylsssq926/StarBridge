@@ -20,19 +20,23 @@
 |---|---|---|
 | `/channels` | 渠道（=上游源）增删改查、批量、分组、标签、优先级/权重、代理、自动禁用、健康测试 | **接入新源的唯一入口** |
 | `/keys` | 给自己/下游用户签发 API 令牌，可限模型、限分组、限额度、限 IP、限过期 | 决定谁能调用哪些模型 |
-| `/models` | 模型元数据（供应商、能力、上下文窗口等）维护 | 定价页与前端选单的数据来源 |
+| `/models` | 模型清单，分 `metadata` / `vendors` / `deployments` 三段（元数据、供应商、部署） | 定价页与前端选单的数据来源 |
 | `/system-settings/models` | 模型倍率、补全倍率、按次价格、分组倍率、模型改名/映射 | 新模型接进来后必须在这里有价格，否则请求 400 `model_price_error` |
-| `/system-settings/operations` | 自动禁用阈值、重试、并发、余额告警等运营开关 | 影响容错行为 |
-| `/system-settings/request-policies` | 上游请求策略、路由与重试偏好 | 控制多源之间的切换 |
-| `/system-settings/security` `/security` | 敏感操作、IP 白名单、审计 | 上线必查 |
+| `/system-settings/operations` | 分节 `behavior`（自动禁用等行为）、`alerts`（余额/运行告警）、`email`、`worker`、`logs`、`performance`、`update-checker` | 影响容错与运维行为 |
+| `/system-settings/request-policies` | 分节 `filtering`、`routing`、`health` | 控制多源之间的切换与渠道健康 |
+| `/system-settings/security`、`/security` | 安全策略 + `request-limits` 分节（接口/令牌速率限制、SSRF 防护） | 上线必查；**速率限制与本项目新增的日预算是两回事**：限的是"多快"，日预算限的是"当天总量" |
 | `/system-settings/site` `/content` `/auth` `/billing` | 站点信息、导航、公告、支付、登录方式 | 对外运营 |
-| `/task-plugins` | 内置任务插件（生图/视频）绑定到渠道 | 国内生图走这里，无需旁路 |
+| `/task-plugins` | 内置任务插件（生图/视频）绑定到渠道，含已注册插件清单 | 国内生图走这里，无需旁路 |
 | `/playground` | 浏览器里直接调模型 | 新渠道建完第一时间验证 |
-| `/usage-logs` | 每次请求的模型、渠道、token、花费、错误码 | 排障与对账 |
-| `/dashboard` | 汇总趋势 | 看整体负载 |
-| `/users` `/redemption-codes` `/subscriptions` `/wallet` | 用户、兑换码、订阅、额度 | 运营 |
-| `/system-info` | 版本、数据库/缓存状态、性能 | 确认补丁版本（成品显示 `0.1.0`） |
-| `/pricing`（公开） | 对外价格页 | 客户端选型用 |
+| `/usage-logs`、`/usage-logs/audit` | 每次请求的模型、渠道、token、花费、错误码；audit 页看管理端操作 | 排障与对账 |
+| `/dashboard` | 汇总趋势（分节页） | 看整体负载 |
+| `/users` `/redemption-codes` `/subscriptions` `/wallet` | 用户、兑换码、订阅、额度/支付 | 运营 |
+| `/keys` 之外还有 `/profile` | 个人资料、密码、2FA、Passkey、OAuth 绑定 | 账号自助 |
+| `/chat`、`/chat2link` | 内置会话与第三方客户端跳转配置 | 给使用者直接试 |
+| `/system-info` | 版本、数据库/缓存状态、性能 | 确认补丁版本（成品 0.2.0 显示 `0.2.0`） |
+| `/pricing`、`/pricing/<modelId>`、`/rankings`（公开） | 对外价格页与排行 | 客户端选型用 |
+
+> 表格来自 `web/src/routes/` 的实际路由与各界面 `section-registry.tsx` 的分节 id，不是照抄上游 README；系统设置页大多带 `$section` 子路径，例如实测见过的 `/system-settings/request-policies/routing`。
 
 ## 3. 在 `/channels` 里能选到的源类型
 
@@ -79,7 +83,7 @@ curl http://<host>:3800/v1/chat/completions \
 
 | 旁路 | 自带控制台 | 加账号方式 | 在 new-api 里怎么接 |
 |---|---|---|---|
-| AIClient2API | `http://127.0.0.1:3100` | 界面里逐个 provider 走 OAuth（回调端口 8086 / 1455 / 56121 / 19876-19880 已在 compose 里只绑 127.0.0.1） | 渠道 `58` 或 `59`，Base URL `http://aiclient2api:3000/v1`，Key 填旁路自己的 API Key |
+| AIClient2API | `http://127.0.0.1:3100` | 界面里逐个 provider 走 OAuth（容器内 `src/ui-modules/provider-api.js`、`oauth-api.js` 含 kiro/antigravity 相关模块；回调端口 8086 / 1455 / 56121 / 19876-19880 已在 compose 里只绑 127.0.0.1） | 渠道 `58` 或 `59`，Base URL `http://aiclient2api:3000/v1`，Key 填旁路自己的 API Key |
 | CLIProxyAPI | `http://127.0.0.1:8317` | 配置文件 `access.api-keys` + 各 provider 登录 | 渠道 `58`，Base URL 指向 8317 |
 | Sub2API | `http://127.0.0.1:8080` | 自带账号池与计费面板 | 渠道 `59`，填 Sub2API 颁发的 Key |
 
@@ -108,10 +112,12 @@ curl http://<host>:3800/v1/chat/completions \
 
 | 现象 | 原因 | 处理 |
 |---|---|---|
-| 建完渠道马上 503 `No available channel` | 内存缓存同步周期（PoC 设 `SYNC_FREQUENCY=5`） | 等 5~10s；或临时关掉 `MEMORY_CACHE_ENABLED` |
+| 建完渠道马上 503 `model_not_found` | 内存缓存还没同步（PoC `SYNC_FREQUENCY=5`） | 实测：建完立即请求 503，等 7s 同一请求 200；要即时生效可关 `MEMORY_CACHE_ENABLED` 走数据库选路 |
 | 400 `model_price_error` | 模型没定价 | 去「系统设置 → 模型/运营」补倍率或按次价格 |
 | 429 `channel:daily_token_limit_exceeded` | 该渠道当日 token 已到达上限 | 面板里调高限额或置 0；次日零点（容器本地时区）自动重置 |
-| 429 `channel:daily_request_limit_exceeded` | 该渠道当日请求数已到达上限（生图/按次任务也算） | 同上；账号型上游建议两个预算都设 |
+| 429 `channel:daily_request_limit_exceeded` | 该渠道当日请求数已到达上限（生图/视频/按次任务也算） | 同上；账号型上游建议两个预算都设 |
+
+两个日预算计数器都按容器本地时区的"次日零点"过期：实测 `channel_daily_requests:<id>:<date>` 在当天 00:22 时剩余 TTL 85079s（≈23.6h），即零点整清空。
 | 503 与 429 混淆 | 两者语义不同：503 = 没有候选渠道；429 = 候选都在日限额上 | 已实测区分，无需处理 |
 | 刚发的请求没算进日限额 | 用量在响应发出后的结算阶段写入，瞬时并发可略微超限 | 与额度扣减同样的最终一致语义 |
 | 令牌 Key 看不到了 | 接口只返回掩码 Key（安全设计） | 只能创建当次复制；必要时新建令牌 |

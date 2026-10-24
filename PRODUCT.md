@@ -38,7 +38,7 @@
 | `scripts/build-image.sh` | 构建含私有补丁的成品镜像 |
 | `scripts/upstream-sync.sh` | 上游状态 / 导出 / 重放 / 校验 |
 | `scripts/mock-upstream.cjs` | 假上游（固定 usage），供端到端脚本使用 |
-| `scripts/verify-daily-limit.mjs` | 日限额 10 项边界检查（缓存路径 / DB 路径 / 无 Redis 均可跑） |
+| `scripts/verify-daily-limit.mjs` | 日限额 14 项边界检查（缓存路径 / DB 路径 / 无 Redis 均可跑） |
 | `scripts/verify-compat.mjs` | 协议与接线兼容检查（chat / messages / gemini / images / 错误语义） |
 | `scripts/verify-channel-types.mjs` | 逐上游类型的面板适配与限额生效检查 |
 | `scripts/verify-minimal-deployment.mjs` | 最小部署形态实测（无 Redis、无内存缓存）：`/setup` 首启 + 两个日限额，SQLite/MySQL 已各 10/10 |
@@ -113,7 +113,7 @@ docker compose -f docker-compose.poc.yml up -d
 ## 设计原则
 
 1. **核心不合并旁路代码**：账号池/OAuth 刷新放在 AIClient2API / CLIProxyAPI / Sub2API，通过 58/59/60 渠道接入。
-2. **私有补丁保持小**：当前只有日限额一个特性，约 500 行；改的是过滤器 + 结算钩子，不重写选路核心。
+2. **私有补丁保持小**：两个日预算特性合计 32 个实现文件 `+622/-38`，另有 4 个测试文件 `+307`（`git diff v1.0.0-rc.46..HEAD` 实测）。改的是过滤器 + 结算/提交钩子，不重写选路核心。
 3. **跟上游优先**：每次升级从新 tag 建 worktree，重放 `patches/0001`、`0002`，跑 `scripts/upstream-sync.sh check`。
 4. **国内模型优先**：DeepSeek、Kimi、智谱、通义、MiniMax、火山、百度、腾讯等使用 new-api 原生渠道。
 5. **生图走官方扩展点**：优先用 new-api 内置 Task Plugin（阿里 Wan/Qwen-Image、豆包 Seedream），不修改核心。
@@ -128,7 +128,7 @@ docker compose -f docker-compose.poc.yml up -d
 
 ## 迭代规划
 
-详见 [docs/ITERATION_PLAN.md](docs/ITERATION_PLAN.md)。当前 v0.1.0 已完成：
+详见 [docs/ITERATION_PLAN.md](docs/ITERATION_PLAN.md)。当前 v0.2.0 已完成：
 
 - 上游基线重建
 - 日限额后端 + 前端 + 测试
@@ -154,11 +154,14 @@ docker compose -f docker-compose.poc.yml up -d
 
 详见 [docs/VERIFICATION.md](docs/VERIFICATION.md)。所有证据均来自实际构建、测试、容器或浏览器操作。
 
-本轮自洽性验证结论（可重复执行）：
+可复现的验证结论（命令见 `docs/UPSTREAM_SYNC.md` §6）：
 
 - 新鲜 worktree 从上游 tag `v1.0.0-rc.46` 重放补丁 → 前端构建 + 类型检查 + 后端回归全通过。
-- 日限额 10 项边界检查在三种运行形态下均 10/10：内存缓存选路、数据库选路、未启用 Redis（进程内回退）。
+- 日限额 14 项边界检查在三种运行形态下均 14/14：内存缓存选路、数据库选路、未启用 Redis（进程内回退）。
 - 协议/接线兼容 7 项全通过：OpenAI、Claude、Gemini 三种入站格式 + 生图 + 错误语义（503 与 429 区分）+ 无效令牌 + 旁路可达。
-- 新增代码不含裸 SQL、不加列、不改迁移，因此 SQLite/MySQL/PostgreSQL 行为一致（实测 Postgres，回退路径实测无 Redis）。
+- 逐上游类型：17/17 类型面板适配、15/15 可路由类型到顶 429（含 58/59/60 旁路类型与 62/63 推理框架）。
+- 三库与首启：SQLite、MySQL 8.4 各 10/10（无 Redis、无内存缓存的最小部署形态），Postgres 由常驻 PoC 栈覆盖；`/setup` 向导建出的首个账号即管理员，无需手工提权。
+- 发布门禁已落成 `.github/workflows/product-gates.yml`，其等价命令在本地演练通过。
+- 文档自身也过了"主张 vs 证据"审计（`docs/VERIFICATION.md` §12）：过期数字、凭记忆写的面板地图、含糊的时序说法都改成了实测值。
 
 上线后的自服务操作面板见 [docs/OPERATIONS.md](docs/OPERATIONS.md)。真实 Kiro/Antigravity 账号与真实国内厂商 Key 仍未接入，属于外部凭据依赖。
