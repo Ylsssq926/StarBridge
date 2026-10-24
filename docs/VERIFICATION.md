@@ -61,9 +61,9 @@
 | `daily_request_limit=1` + 生图请求（无 token 回报） | 第一次 200，第二次 429 `channel:daily_request_limit_exceeded` | 通过 |
 | 清空 `daily_request_limit` | 生图渠道恢复 200 | 通过 |
 | `daily_request_limit=2` + 文本请求 | 200 / 200 / 429（请求数计量，与 token 无关） | 通过 |
-| 内存缓存选路（`MEMORY_CACHE_ENABLED=true`） | 14/14 | 通过 |
-| 数据库选路（`MEMORY_CACHE_ENABLED=false`） | 10/10（旧版脚本） | 通过 |
-| 未启用 Redis（进程内回退计数） | 10/10（旧版脚本） | 通过 |
+| 内存缓存选路（`MEMORY_CACHE_ENABLED=true`） | 14/14 | 通过（0.2.0 镜像） |
+| 数据库选路（`MEMORY_CACHE_ENABLED=false`） | 14/14 | 通过 |
+| 未启用 Redis（进程内回退计数） | 14/14（协议兼容 7/7 同环境通过） | 通过 |
 
 单元层：`go test ./common -run Daily`（token/request 两个计数器互不串扰）与 `go test ./model -run 'Daily|FilterCandidate'`（两个预算的过滤器归因、预算同时耗尽时优先报 token）均通过。
 
@@ -79,7 +79,7 @@
 | 无效令牌 | 401 |
 | 网关 → AIClient2API（docker 网络内） | 可达，返回旁路自身的鉴权/模型响应 |
 
-`scripts/verify-compat.mjs` 覆盖的是"同一条 OpenAI 渠道能不能收这三种格式"。另外还按上游类型逐条验证了控制台的适配（`scripts/verify-channel-types.mjs`）：每种类型都建两条渠道（一条不带 `daily_token_limit`、一条带），比较两者校验结果是否一致，再回读 `setting` 并做一次无关字段更新确认限额不被覆盖。
+`scripts/verify-compat.mjs` 覆盖的是"同一条 OpenAI 渠道能不能收这三种格式"。另外还按上游类型逐条验证了控制台的适配（`scripts/verify-channel-types.mjs`）：每种类型都建两条渠道（一条不带日限额字段、一条同时带 `daily_token_limit` 与 `daily_request_limit`），比较两者校验结果是否一致，再回读 `setting` 并做一次无关字段更新确认两个限额都不被覆盖。
 
 | 类型 | 面板建渠道 | 限额保存/更新后仍在 | 请求可达 | 到顶返回 429 |
 |---|---|---|---|---|
@@ -97,7 +97,7 @@
 | 58 Advanced Custom | ok（附 `advanced_custom` 路由） | ok | 200 | 是 |
 | 59 Sub2API | ok | ok | 200 | 是 |
 | 60 New API | ok | ok | 200 | 是 |
-| 61 Task Plugin | ok，`task_plugin_key=alibaba` 与 `daily_token_limit` 共存且不互相覆盖 | ok | 类型 61 不走 chat | 未断言 |
+| 61 Task Plugin | ok，`task_plugin_key=alibaba` 与两个日限额字段共存且不互相覆盖 | ok | 类型 61 不走 chat | 未断言（生图改由 §4 的请求数预算验证） |
 | 62 vLLM | ok | ok | 200 | 是 |
 | 63 SGLang | ok | ok | 200 | 是 |
 
@@ -226,6 +226,13 @@ rm docker-compose.poc.override.yml
 | 重放 worktree 构建 | `go build ./...` + relaykit + 日限额/选路/任务计费回归通过 |
 | 成品 0.1.2 | `new-api-daily-limit:{local,0.1.2}` + 别名 `starbridge-gateway:{local,0.1.2}`；三套件复跑 10/10、7/7、15/15 |
 | 版本 tag 纪律 | 0.1.0 曾被同 tag 重建覆盖（如实记录）；此后策略写入 `docs/UPSTREAM_SYNC.md` §3.7：内容变化必须升 `PRODUCT_VERSION` |
+| 0.2.0 请求数预算重放 | 12 个提交在纯净 rc.46 worktree 上 `git am -3` 全部成功 → renormalize → `go build` + common/model/service 回归通过（REHEARSAL_020_OK） |
+| 0.2.0 端到端 | `verify-daily-limit` 14/14（三种运行形态）、`verify-compat` 7/7、`verify-channel-types` 17/17 适配 + 15/15 到顶 429 |
+
+自审发现的实现过程失误（同样记录，避免"只留成功叙事"）：
+
+- 第一次 `git add` 混入了一个不存在的路径，导致该批 add 整体失败，功能提交只含 i18n 与脚本；靠提交后 `git status` 复查发现，补齐后合并进同一个功能提交。
+- 给 `verify-daily-limit.mjs` 加辅助函数时重复声明了 `listChannels`，`node --check` 直接报 SyntaxError；说明脚本必须先过语法检查再跑。
 
 自审发现的真实缺陷（均已修并留证）：
 
