@@ -1,20 +1,34 @@
-// SQLite + first-run bootstrap check for the delivered image.
-//
-// It proves, on one throwaway instance without Redis and without Postgres:
+// Minimal-deployment check for the delivered image: one engine at a time, no
+// Redis, no memory cache. It proves, on a throwaway instance:
 //   1. the /setup wizard path creates a working administrator;
 //   2. the per-day token budget and the per-day request budget are both saved
 //      and both enforced on the plain database selection path;
 //   3. image requests (which report no usage) are stopped by the request budget.
 //
-// Usage: docker run -d --name nap-sqlite -p 127.0.0.1:3811:3000 new-api-daily-limit:0.2.0
-//        node scripts/verify-sqlite-setup.mjs [base_url] [container]
+// Usage (SQLite, the default):
+//   docker run -d --name nap-sqlite -p 127.0.0.1:3811:3000 new-api-daily-limit:<ver>
+//   node scripts/verify-minimal-deployment.mjs [base_url] [container]
+//
+// Usage (any other engine): point KEY_CMD at a command that prints the plaintext
+// key of the token this script creates, and set EXPECT_DB to the engine name.
+// Put the command in a script file: KEY_CMD goes through `bash -lc`, so an
+// inline `select \`key\` ...` gets its backticks reinterpreted as command
+// substitution. A file avoids the nested quoting entirely.
+//   EXPECT_DB=mysql KEY_CMD=/tmp/nap-mysql-key.sh \
+//   node scripts/verify-minimal-deployment.mjs http://localhost:3812 nap-mysqlapp
+//
+// Verified on sqlite, mysql and postgresql (10/10 each) without Redis.
 const BASE = process.argv[2] || 'http://localhost:3811';
 const CONTAINER = process.argv[3] || 'nap-sqlite';
+const EXPECT_DB = process.env.EXPECT_DB || 'sqlite';
+const KEY_CMD = process.env.KEY_CMD || '';
+const SQLITE_DIR = process.env.SQLITE_DIR || '/data';
 const ADMIN_USER = 'setuproot';
 const ADMIN_PASS = 'Setup-Verify-123';
 const MOCK_BASE = 'http://host.docker.internal:3999';
-const TEXT_MODEL = 'verify-sqlite-text';
-const IMAGE_MODEL = 'verify-sqlite-image';
+const TEXT_MODEL = 'verify-minimal-text';
+const IMAGE_MODEL = 'verify-minimal-image';
+const TOKEN_NAME = 'verify-minimal';
 
 const jar = new Map();
 let accessToken = '';
@@ -93,19 +107,23 @@ async function createChannel(name, model, setting) {
 
 // SQLite stores the plaintext token key and the API only ever returns a mask,
 // so the PoC reads the freshly copied database file to obtain it.
-async function readTokenKeyFromSqlite(name) {
+// The API only ever returns a masked key, so the harness needs the plaintext
+// one from the database: KEY_CMD for any engine, or a direct SQLite file read.
+async function readRelayTokenKey(name) {
   const { execFileSync } = await import('node:child_process');
   const fs = await import('node:fs');
-  // The live database runs in WAL mode: the main file can stay a few kilobytes
-  // while every recent write sits in -wal. Copy all three, or the read sees an
-  // empty database.
-  const dir = `${await (await import('node:os')).tmpdir()}/verify-sqlite-${process.pid}`;
+  if (KEY_CMD) {
+    return execFileSync('bash', ['-lc', KEY_CMD], { encoding: 'utf8' }).trim();
+  }
+  // SQLite runs in WAL mode: the main file can stay a few kilobytes while every
+  // recent write sits in -wal. Copy all three, or the read sees an empty database.
+  const dir = `${(await import('node:os')).tmpdir()}/verify-minimal-${process.pid}`;
   fs.mkdirSync(dir, { recursive: true });
   try {
-    execFileSync('docker', ['cp', `${CONTAINER}:/data/one-api.db`, `${dir}/one-api.db`]);
+    execFileSync('docker', ['cp', `${CONTAINER}:${SQLITE_DIR}/one-api.db`, `${dir}/one-api.db`]);
     for (const suffix of ['-wal', '-shm']) {
       try {
-        execFileSync('docker', ['cp', `${CONTAINER}:/data/one-api.db${suffix}`, `${dir}/one-api.db${suffix}`]);
+        execFileSync('docker', ['cp', `${CONTAINER}:${SQLITE_DIR}/one-api.db${suffix}`, `${dir}/one-api.db${suffix}`]);
       } catch {
         /* the side files disappear once the database checkpoints */
       }
@@ -126,8 +144,8 @@ async function readTokenKeyFromSqlite(name) {
 async function main() {
   const before = await api('/api/setup');
   record(
-    'fresh instance reports sqlite and no root yet',
-    before.json.data?.database_type === 'sqlite' && before.json.data?.root_init === false,
+    `fresh instance reports ${EXPECT_DB} and no root yet`,
+    before.json.data?.database_type === EXPECT_DB && before.json.data?.root_init === false,
     `database_type=${before.json.data?.database_type} root_init=${before.json.data?.root_init}`
   );
 
@@ -162,24 +180,24 @@ async function main() {
     method: 'PUT',
     body: { key: 'ModelPrice', value: JSON.stringify({ [TEXT_MODEL]: 0.01, [IMAGE_MODEL]: 0.01 }) },
   });
-  await api('/api/token/', { method: 'POST', body: { name: 'verify-sqlite', expired_time: -1, unlimited_quota: true } });
+  await api('/api/token/', { method: 'POST', body: { name: TOKEN_NAME, expired_time: -1, unlimited_quota: true } });
   let apiKey = '';
   let keyError = '';
   try {
-    const raw = await readTokenKeyFromSqlite('verify-sqlite');
+    const raw = await readRelayTokenKey(TOKEN_NAME);
     apiKey = raw.startsWith('sk-') ? raw.slice(3) : raw;
   } catch (err) {
-    keyError = err.message.slice(0, 120);
+    keyError = err.message.slice(0, 160);
   }
-  record('plaintext token key readable from sqlite', !!apiKey, keyError || `len=${apiKey.length}`);
+  record(`plaintext token key readable from ${EXPECT_DB}`, !!apiKey, keyError || `len=${apiKey.length}`);
   if (!apiKey) {
     console.log('\ncannot continue without a relay key');
     process.exit(1);
   }
 
-  const text = await createChannel('verify-sqlite-text', TEXT_MODEL, JSON.stringify({ daily_token_limit: 10 }));
-  const image = await createChannel('verify-sqlite-image', IMAGE_MODEL, JSON.stringify({ daily_request_limit: 1 }));
-  record('both budget channels created on sqlite', !!text.channel && !!image.channel, `text=${text.channel?.id} image=${image.channel?.id} ${text.message}${image.message}`);
+  const text = await createChannel('verify-minimal-text', TEXT_MODEL, JSON.stringify({ daily_token_limit: 10 }));
+  const image = await createChannel('verify-minimal-image', IMAGE_MODEL, JSON.stringify({ daily_request_limit: 1 }));
+  record(`both budget channels created on ${EXPECT_DB}`, !!text.channel && !!image.channel, `text=${text.channel?.id} image=${image.channel?.id} ${text.message}${image.message}`);
 
   const echoSetting = (row) => row?.setting || '';
   record(
@@ -194,7 +212,7 @@ async function main() {
   await new Promise((r) => setTimeout(r, 2000));
   const t2 = await relay('/v1/chat/completions', apiKey, TEXT_MODEL, { messages: [{ role: 'user', content: 'hi' }] });
   record(
-    'token budget enforced on sqlite without Redis',
+    `token budget enforced on ${EXPECT_DB} without Redis`,
     t1.status === 200 && t2.status === 429 && t2.code === 'channel:daily_token_limit_exceeded',
     `${t1.status}/${t2.status} code=${t2.code || '-'}`
   );

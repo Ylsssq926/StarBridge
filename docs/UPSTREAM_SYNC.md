@@ -207,8 +207,10 @@ node scripts/verify-daily-limit.mjs      # 日限额 14 项边界（两个预算
 node scripts/verify-compat.mjs           # 协议/接线 7 项
 node scripts/verify-channel-types.mjs    # 17 种渠道类型的面板适配
 docker run -d --name nap-sqlite -p 127.0.0.1:3811:3000 new-api-daily-limit:<version>
-node scripts/verify-sqlite-setup.mjs     # SQLite + /setup 首启 10 项（最小部署形态）
+node scripts/verify-minimal-deployment.mjs   # SQLite 最小部署形态 10 项
 docker rm -f nap-sqlite
+EXPECT_DB=mysql KEY_CMD=/tmp/nap-mysql-key.sh \
+  node scripts/verify-minimal-deployment.mjs http://localhost:3812 nap-mysqlapp  # 换引擎复跑
 ```
 
 可选：

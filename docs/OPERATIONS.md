@@ -131,10 +131,14 @@ node scripts/verify-daily-limit.mjs     # 日限额 10 项边界（需要 script
 node scripts/verify-compat.mjs          # 协议/接线 7 项
 node scripts/verify-channel-types.mjs   # 17 种渠道类型的面板适配 + 限额生效
 
-# 最小部署形态实测（SQLite + /setup 首启，无 Postgres / 无 Redis）
-docker run -d --name nap-sqlite -p 127.0.0.1:3811:3000 new-api-daily-limit:0.2.0
-node scripts/verify-sqlite-setup.mjs
+# 最小部署形态实测（/setup 首启 + 两个日限额，无 Redis、无内存缓存）
+# SQLite（默认，直接读库文件取明文 key）
+docker run -d --name nap-sqlite -p 127.0.0.1:3811:3000 new-api-daily-limit:<version>
+node scripts/verify-minimal-deployment.mjs
 docker rm -f nap-sqlite
+# MySQL / 其它引擎：用 KEY_CMD 指向一个打印明文 key 的脚本文件
+# （KEY_CMD 会经过 bash -lc，内联反引号会被当成命令替换，务必放文件里）
+EXPECT_DB=mysql KEY_CMD=/tmp/nap-mysql-key.sh node scripts/verify-minimal-deployment.mjs http://localhost:3812 nap-mysqlapp
 ```
 
 改完代码要发布：`./scripts/build-image.sh` 会重新生成 `bin/new-api-linux` 并打 `new-api-daily-limit:local` + `new-api-daily-limit:$(cat PRODUCT_VERSION)` 两个 tag。

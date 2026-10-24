@@ -110,18 +110,24 @@
 
 回归：`tsgo -b` 通过，渠道特性单测 358 项全通过（29 个文件）。其中新增一条面板回归：编辑渠道时两个日限额字段都要从 `setting` 回读、可编辑，且编辑后仍停在"其他设置"页签（正是上面第 1、2 条缺陷的守护测试）。
 
-**SQLite 与首启初始化实测**（`scripts/verify-sqlite-setup.mjs`，10/10）：用交付镜像 `new-api-daily-limit:0.2.0` 起一次性容器，不带 `SQL_DSN` 也不带 Redis，即"最小可部署形态"，逐项实测：
+**三库与首启初始化实测**（`scripts/verify-minimal-deployment.mjs`，每种引擎 10/10）：用交付镜像起一次性容器，不带 Redis、不开内存缓存，即"最小可部署形态"，逐项实测：
 
-| 检查 | 结果 |
-|---|---|
-| 空库首启 | `GET /api/setup` → `database_type=sqlite`、`root_init=false` |
-| 初始化向导 | `POST /api/setup` 返回"System initialized successfully" |
-| 向导账号权限 | 首个账号 `id=1 role=100`，可直接调用管理端接口（无需手工提权） |
-| 两个日限额保存 | `{"daily_token_limit":10}` / `{"daily_request_limit":1}` 原样落库 |
-| token 预算 | 数据库选路 + 进程内计数：200 → 429 `channel:daily_token_limit_exceeded` |
-| 请求数预算 | 生图（无 token 回报）：200 → 429 `channel:daily_request_limit_exceeded` |
+| 检查 | SQLite | MySQL 8.4 |
+|---|---|---|
+| 空库首启 | `database_type=sqlite`、`root_init=false` | `database_type=mysql`、`root_init=false` |
+| 初始化向导 | `POST /api/setup` 成功 | 同 |
+| 向导账号权限 | 首个账号 `id=1 role=100`，可调管理端 | 同 |
+| 两个日限额保存 | `{"daily_token_limit":10}` / `{"daily_request_limit":1}` 原样落库 | 同 |
+| token 预算 | 200 → 429 `channel:daily_token_limit_exceeded` | 同 |
+| 请求数预算 | 生图（无 token 回报）200 → 429 `channel:daily_request_limit_exceeded` | 同 |
 
-顺带查到一个运维要点：SQLite 以 WAL 模式运行，容器里主库文件只有 4KB、真实内容全在 `one-api.db-wal`（3MB）。只 `cp` 主库文件会得到一个"空库"，备份必须连 `-wal`/`-shm` 一起取，或先做 checkpoint。
+PostgreSQL 由常驻 PoC 栈覆盖（同一套断言在 14 项端到端脚本里通过）。
+
+顺带查到的三条运维要点：
+
+1. SQLite 以 WAL 模式运行，容器里主库文件只有 4KB、真实内容全在 `one-api.db-wal`（3MB）。只 `cp` 主库文件会得到"空库"，备份必须连 `-wal`/`-shm` 一起取，或先 checkpoint。
+2. `mysql:8` 现在是 8.4.x，`--default-authentication-plugin` 已被移除，带上它初始化直接失败（`unknown variable`）；去掉该参数即可，驱动侧 caching_sha2_password 无需额外配置。
+3. 默认 bridge 网络下容器互访被拒（`connection refused`），要用用户自定义网络（compose 本来就会建），不要用 `--link` 或裸容器 IP。
 
 ## 5. 旁路容器
 
@@ -178,7 +184,7 @@
 8. **限额生效时机**：用量在“响应发出之后”的结算阶段写入，因此同一瞬间的并发请求可能略微超出上限（与自动禁用、额度扣减同样的最终一致语义）。验证脚本为此在两次请求间留 2s，实盘无需处理。
 9. **空数据库首启**：全新库里不会自动出现 `root/12345`，需要先走 `/setup` 初始化向导（或注册后用角色提升为管理员）。SQLite 实例实测：`POST /api/setup` 成功后首个账号即 `role=100`，可直接调用管理端接口，无需手工提权；`GET /api/setup` 在初始化完成后会提前返回，`root_init`/`database_type` 不再回填。
 10. **令牌 Key 不可回显**：`/api/token/` 的创建与查询只返回掩码 Key，脚本或运维要拿到明文 Key 只能在创建当次由界面复制，不能事后再取。
-11. **数据库兼容**：新增代码不含裸 SQL、不加列、不改 `model/main.go` 迁移，SQLite/MySQL/PostgreSQL 三库行为一致（PoC 实测 Postgres；回退路径实测无 Redis）。
+11. **数据库兼容**：新增代码不含裸 SQL、不加列、不改 `model/main.go` 迁移；SQLite、MySQL、PostgreSQL 三种引擎都按"最小部署形态"实测过（各 10/10，Postgres 由常驻 PoC 栈覆盖），Redis 关闭时的进程内回退也已实测。
 
 ## 10. 未验证（需要外部凭据）
 
@@ -241,13 +247,16 @@ rm docker-compose.poc.override.yml
 | 版本 tag 纪律 | 0.1.0 曾被同 tag 重建覆盖（如实记录）；此后策略写入 `docs/UPSTREAM_SYNC.md` §3.7：内容变化必须升 `PRODUCT_VERSION` |
 | 0.2.0 请求数预算重放 | 12 个提交在纯净 rc.46 worktree 上 `git am -3` 全部成功 → renormalize → `go build` + common/model/service 回归通过（REHEARSAL_020_OK） |
 | 0.2.0 端到端 | `verify-daily-limit` 14/14（三种运行形态）、`verify-compat` 7/7、`verify-channel-types` 17/17 适配 + 15/15 到顶 429 |
-| SQLite 最小部署形态 | `verify-sqlite-setup` 10/10：`/setup` 首启建管理员（role=100）、两个预算原样落库、数据库选路 + 进程内计数下都能 429 |
+| 三库最小部署形态 | `verify-minimal-deployment`：SQLite 10/10、MySQL 8.4 10/10（`/setup` 首启建管理员 role=100、两个预算原样落库、无 Redis 也能 429）；Postgres 由常驻 PoC 栈的 14 项端到端覆盖 |
 | CI 门禁落地 | 新增 `.github/workflows/product-gates.yml`（backend / frontend / sync-integrity）；YAML 解析通过，sync-integrity 的等价命令在本地演练通过（CI_SYNC_JOB_WOULD_PASS）。演练中发现 `go:embed web/dist` 会让没有前端产物的重放工作树编译失败，改为由 frontend job 产出 dist 供 replay 使用 |
 
 自审发现的实现过程失误（同样记录，避免"只留成功叙事"）：
 
 - 第一次 `git add` 混入了一个不存在的路径，导致该批 add 整体失败，功能提交只含 i18n 与脚本；靠提交后 `git status` 复查发现，补齐后合并进同一个功能提交。
 - 给 `verify-daily-limit.mjs` 加辅助函数时重复声明了 `listChannels`，`node --check` 直接报 SyntaxError；说明脚本必须先过语法检查再跑。
+- MySQL 复跑时把取 key 的命令内联进 `KEY_CMD`，反引号标识符被 `bash -lc` 当成命令替换执行（`key: command not found`）；改为脚本文件传参并写进用法注释。
+- 用 `--default-authentication-plugin` 起 `mysql:8` 直接初始化失败（8.4 已移除该参数）；照官方默认参数重来即可。
+- 把应用容器留在默认 bridge 网络上按容器 IP 连 MySQL 得到 `connection refused`；换用户自定义网络（compose 的默认行为）后即通。
 
 自审发现的真实缺陷（均已修并留证）：
 
