@@ -34,7 +34,7 @@
 | `.env.product.example` | compose 环境变量模板 |
 | `Dockerfile.product` | 成品镜像（复制 Linux 二进制） |
 | `Makefile.product` | 可选 make 入口（本机未安装 make 时用 product.sh） |
-| `scripts/product.sh` | 统一入口：image / up / down / ps / logs / status / check |
+| `scripts/product.sh` | 统一入口：image / up / down / ps / logs / status / check / check-full / drill |
 | `scripts/build-image.sh` | 构建含私有补丁的成品镜像 |
 | `scripts/upstream-sync.sh` | 上游状态 / 导出 / 重放 / 校验 / 一键演练 `drill` |
 | `scripts/mock-upstream.cjs` | 假上游（固定 usage），供端到端脚本使用 |
@@ -42,6 +42,7 @@
 | `scripts/verify-compat.mjs` | 协议与接线兼容检查（chat / messages / gemini / images / 错误语义） |
 | `scripts/verify-channel-types.mjs` | 逐上游类型的面板适配与限额生效检查 |
 | `scripts/verify-minimal-deployment.mjs` | 最小部署形态实测（无 Redis、无内存缓存）：`/setup` 首启 + 两个日限额，SQLite/MySQL 已各 10/10 |
+| `scripts/backup-drill.sh` | 备份恢复演练（Postgres）：转储 → 旁路库恢复 → 逐表行数比对 → 用恢复库起容器探活；只读生产库，删库名有 `nap_restore_*` 守卫 |
 | `patches/series/` | **主机制**：由分支提交生成的 patch series（`git am -3` 重放） |
 | `patches/legacy/` | pre-commit 基线的手工 file patch，仅供 `USE_SERIES=0` 回退与历史对照 |
 

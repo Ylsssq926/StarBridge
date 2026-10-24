@@ -149,4 +149,28 @@ docker rm -f nap-sqlite
 EXPECT_DB=mysql KEY_CMD=/tmp/nap-mysql-key.sh node scripts/verify-minimal-deployment.mjs http://localhost:3812 nap-mysqlapp
 ```
 
+### 8.1 备份恢复演练（Postgres）
+
+```bash
+./scripts/backup-drill.sh                # dump → 恢复到一次性库 → 逐表行数比对 → 清理
+BOOT_CHECK=1 ./scripts/backup-drill.sh   # 再用恢复出来的库真起一个应用容器并探活
+KEEP=1 ./scripts/backup-drill.sh         # 保留 dumps/ 备份文件与旁路库以便查看
+```
+
+脚本只会读生产库，写和删都限制在名字形如 `nap_restore_<时间戳>` 的旁路库里（其它名字直接拒绝，
+`createdb` 撞到已存在的库时也**不会**去 drop 它——这条已经实测过）。真出事要恢复时，
+把 `pg_restore` 的目标换成应用库本身，并先停应用容器：
+
+```bash
+docker stop new-api-poc
+docker cp backups/<name>.dump new-api-poc-postgres:/tmp/r.dump
+docker exec new-api-poc-postgres pg_restore -U newapi -d new-api --no-owner --exit-on-error /tmp/r.dump
+docker start new-api-poc
+```
+
+一条必须知道的边界：**两个日限额的当日计数器不是账本**。它们存在 Redis（或进程内回退），
+不在数据库转储里；恢复数据库而不恢复 Redis，等于把当天已用额度清零——渠道只是重新开始消耗当天预算，
+不会算错钱（计费看 `logs`/`quota_data`，那些在转储里）。所以恢复后如果预算保护很重要，
+手工确认一次当天用量即可。
+
 改完代码要发布：`./scripts/build-image.sh` 会重新生成 `bin/new-api-linux` 并打 `new-api-daily-limit:local` + `new-api-daily-limit:$(cat PRODUCT_VERSION)` 两个 tag。

@@ -303,3 +303,20 @@ rm docker-compose.poc.override.yml
 仍未闭环（外部依赖，非机制问题）：真实 Kiro/Antigravity 账号、真实国内厂商 Key 与真实出图。
 生图/按次计费任务的日限额计量已经实现（`daily_request_limit`，提交时计数）并由
 `verify-daily-limit` 的"出图不产生 token 也照样占用预算"用例覆盖（§4），不再算未闭环项。
+
+## 14. 备份与恢复演练（Postgres）
+
+`scripts/backup-drill.sh`（只读生产库；写与删都限定在 `nap_restore_*` 命名的旁路库）：
+
+| 检查 | 实测 |
+|---|---|
+| 转储非空 | `pg_dump -Fc` → 194,835 字节 |
+| 结构可恢复 | `pg_restore --no-owner --exit-on-error` 进入一次性库，**无错误退出**（`--exit-on-error` 是关键：默认模式下部分语句失败也会返回 0） |
+| 逐表行数一致 | public schema 下 **38 张表全部一致**（`abilities`/`channels`/`logs`/`quota_data`/`users` 等） |
+| 两个日预算原样回来 | 3 条带 `daily_token_limit` + `daily_request_limit` 的渠道在旁路库里计数相同（设置存在 JSON 列里，结构恢复成功不等于内容 round-trip，所以单独查） |
+| 恢复出来的库能真跑 | `BOOT_CHECK=1` 用恢复库另起一个应用容器（**不接 Redis**）→ `/api/status` 返回 `"success":true` |
+| 失败不留垃圾 | 预置同名旁路库后再跑：`createdb` 失败 → 退出码 1，且**没有** drop 那个已存在的库（`SIDE_DB_CREATED` 守卫，实测库仍在） |
+| 边界：计数器不在库里 | public schema 下不存在任何 `*daily*` / `*usage*` 表 → 当日额度只在 Redis/进程内；恢复库但不恢复 Redis 会把当天已用量清零（只影响预算保护，不影响计费，计费看 `logs`/`quota_data`） |
+
+SQLite 与 MySQL 的等价实测在 §4 的 `verify-minimal-deployment.mjs`（含 WAL 三文件拷贝的坑）。
+演练结束后旁路库与转储都已清理（PoC 栈里留了 3 条带预算的渠道作为下次演练的样本数据）。
