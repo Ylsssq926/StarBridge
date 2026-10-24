@@ -470,6 +470,38 @@ test('selecting a plugin opens a prefilled channel and creates its explicit bind
   expect(screen.getByLabelText('API Key *')).toHaveValue('')
 })
 
+test('both per-day budgets load into the form, stay editable and mark extra settings configured', async () => {
+  const user = userEvent.setup()
+  // The drawer refetches the row by id, so the budgets have to live in the
+  // fixture the API mock returns, not only in the passed-in row.
+  editingChannel = {
+    ...editingChannel,
+    setting: JSON.stringify({
+      daily_token_limit: 5000,
+      daily_request_limit: 3,
+    }),
+  }
+  render(<ConfigurationHarness currentRow={editingChannel} />)
+
+  await user.click(await screen.findByRole('tab', { name: /Other Settings/ }))
+  const tokenLimit = screen.getByLabelText('Daily Token Limit')
+  const requestLimit = screen.getByLabelText('Daily Request Limit')
+  expect(tokenLimit).toHaveValue(5000)
+  expect(requestLimit).toHaveValue(3)
+
+  // Regression guard: the fields must resolve to the "other" section, so editing
+  // one keeps the form on this tab instead of jumping back to connection.
+  fireEvent.change(requestLimit, { target: { value: '4' } })
+  expect(screen.getByLabelText('Daily Request Limit')).toHaveValue(4)
+  expect(
+    screen.getByRole('tab', { name: /Other Settings/ })
+  ).toHaveAttribute('aria-selected', 'true')
+
+  await user.click(screen.getByRole('tab', { name: /Connection & Models/ }))
+  await user.click(screen.getByRole('tab', { name: /Other Settings/ }))
+  expect(screen.getByLabelText('Daily Request Limit')).toHaveValue(4)
+})
+
 test('changing plugins preserves credentials and custom settings while applying existing model and address rules', async () => {
   const user = userEvent.setup()
   render(<ConfigurationHarness />)
