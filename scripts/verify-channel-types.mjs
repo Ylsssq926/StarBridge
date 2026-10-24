@@ -117,7 +117,8 @@ async function createChannel(name, type, setting) {
 
 function hasLimit(channel) {
   try {
-    return Number(JSON.parse(channel.setting || '{}').daily_token_limit) === 10;
+    const parsed = JSON.parse(channel.setting || '{}');
+    return Number(parsed.daily_token_limit) === 10 && Number(parsed.daily_request_limit) === 5;
   } catch {
     return false;
   }
@@ -147,7 +148,7 @@ async function main() {
 
     // Baseline without our field, so a type-specific rejection is not blamed on the patch.
     const plain = await createChannel(plainName, type, '{}');
-    const withLimit = await createChannel(limitName, type, JSON.stringify({ daily_token_limit: 10 }));
+    const withLimit = await createChannel(limitName, type, JSON.stringify({ daily_token_limit: 10, daily_request_limit: 5 }));
 
     if (plain.ok !== withLimit.ok) {
       rows.push({ type, label, result: 'DIFFERS', detail: `plain=${plain.ok} limit=${withLimit.ok} ${withLimit.message || plain.message}` });
@@ -163,7 +164,7 @@ async function main() {
       let pairOk = true;
       if (TYPE_EXTRA[type]?.taskPluginKey && after) {
         const parsed = JSON.parse(after.setting || '{}');
-        pairOk = parsed.task_plugin_key === TYPE_EXTRA[type].taskPluginKey && Number(parsed.daily_token_limit) === 10;
+        pairOk = parsed.task_plugin_key === TYPE_EXTRA[type].taskPluginKey && Number(parsed.daily_token_limit) === 10 && Number(parsed.daily_request_limit) === 5;
         detail += ` plugin-key-preserved=${pairOk}`;
       }
       rows.push({
