@@ -176,10 +176,17 @@ for (const stray of freshRows.filter((c) => (c.models || '').includes(modelName)
 // The PoC enforces one active admin session (a second login returns
 // AUTH_SESSION_LIMIT/Conflict), so a run that does not log out blocks the next
 // one. Best-effort: ignore failures, the checks above already happened.
-// The token this run created would otherwise accumulate in the PoC database on
-// every run (a previous version of this harness leaked 32 of them). Same
-// throwaway-stack caveat as the key read above.
-psql(`delete from tokens where name = '${TOKEN_NAME}'`);
+// Cleanup through the API does NOT work as written earlier: GET /api/token/ is
+// paginated, so the freshly created token is not on the first page and a
+// filter-and-delete loop silently deletes nothing — the check that grew out of
+// it was a false green. Delete through the same Postgres access this harness
+// already uses to read the plaintext key, and count the rows to assert it.
+if (process.env.SKIP_DB_CLEANUP !== '1') {
+  psql(`delete from tokens where name = '${TOKEN_NAME}'`);
+  const left = Number(psql(`select count(*) from tokens where name = '${TOKEN_NAME}'`));
+  record('token cleaned up by the harness', left === 0, `left=${left}`);
+}
+
 try {
   await api('/api/user/logout', { method: 'POST' });
 } catch {

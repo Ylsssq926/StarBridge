@@ -287,6 +287,10 @@ async function main() {
 
   const cleanup = await api(`/api/channel/${channel.id}`, { method: 'DELETE' });
   record('cleanup channel deleted', cleanup.json.success === true, JSON.stringify(cleanup.json).slice(0, 80));
+  // Known, unfixed: this run's token is left behind (17 accumulate so far). A
+  // filter-and-delete loop over GET /api/token/ looks right but deletes nothing,
+  // because that endpoint is paginated and the new token is not on page one.
+  // Tracked in docs/ITERATION_PLAN.md as the harness cleanup convention.
   for (const stray of await listChannels()) {
     if (['price-probe', CHANNEL_NAME, IMAGE_CHANNEL_NAME, REQUEST_CHANNEL_NAME].includes(stray.name)) {
       await api(`/api/channel/${stray.id}`, { method: 'DELETE' });
