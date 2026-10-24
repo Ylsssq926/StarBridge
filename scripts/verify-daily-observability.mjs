@@ -176,16 +176,16 @@ for (const stray of freshRows.filter((c) => (c.models || '').includes(modelName)
 // The PoC enforces one active admin session (a second login returns
 // AUTH_SESSION_LIMIT/Conflict), so a run that does not log out blocks the next
 // one. Best-effort: ignore failures, the checks above already happened.
-// Cleanup through the API does NOT work as written earlier: GET /api/token/ is
-// paginated, so the freshly created token is not on the first page and a
-// filter-and-delete loop silently deletes nothing — the check that grew out of
-// it was a false green. Delete through the same Postgres access this harness
-// already uses to read the plaintext key, and count the rows to assert it.
-if (process.env.SKIP_DB_CLEANUP !== '1') {
-  psql(`delete from tokens where name = '${TOKEN_NAME}'`);
-  const left = Number(psql(`select count(*) from tokens where name = '${TOKEN_NAME}'`));
-  record('token cleaned up by the harness', left === 0, `left=${left}`);
+// Cleanup through the API, keyed by search rather than the plain list: GET
+// /api/token/ is paginated (shape {page,page_size,total,items}), so a freshly
+// created token can be missing from page one and a list-and-filter loop silently
+// deletes nothing — that is how a previous version of this harness produced a
+// false green. search?keyword= returns the match; DELETE answers success:true.
+for (const stale of (await api(`/api/token/search?keyword=${encodeURIComponent(TOKEN_NAME)}`)).json.data?.items || []) {
+  await api(`/api/token/${stale.id}`, { method: 'DELETE' });
 }
+const afterTokens = (await api(`/api/token/search?keyword=${encodeURIComponent(TOKEN_NAME)}`)).json.data?.items || [];
+record('token cleaned up by the harness', afterTokens.filter((t) => t?.name === TOKEN_NAME).length === 0, `left=${afterTokens.length}`);
 
 try {
   await api('/api/user/logout', { method: 'POST' });

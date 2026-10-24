@@ -336,3 +336,5 @@ SQLite 与 MySQL 的等价实测在 §4 的 `verify-minimal-deployment.mjs`（�
 | 版本纪律 | 新增接口属内容变化 → `PRODUCT_VERSION` 0.2.0 → **0.3.0**，镜像重打为 `new-api-daily-limit:0.3.0` 与别名 `starbridge-gateway:0.3.0`（同一 tag 不覆盖内容）；`.gitattributes` 补 `PRODUCT_VERSION text eol=lf`，避免 Windows 检出 CRLF 把版本号读成带 `\r` 的 tag |
 | §9 结算竞态：从推断升级为复现 | 加结算等待后连跑两次均 **16/16**；加等待之前，第二次连跑实测出现"第二个请求 status=200、requests_used=2、rejects=0"——文本 relay 用量在响应后结算，紧接的下一次请求可抢在结算前通过选路。§9 写的边界现在有复现输出，不只是文字 |
 | harness 会自我阻塞（会话限制） | PoC 限制单会话：上一次运行不 logout，下一次登录直接 `AUTH_SESSION_LIMIT / Conflict`（实测撞到过）。harness 末尾补 best-effort 退出后，连跑两次均可登录 |
+| harness 收尾：搜索式删除有效，但 token 是**软删除** | `GET /api/token/` 与 `/api/token/search?keyword=` 返回 `{page,page_size,total,items}`；按 keyword 找到 id 后 `DELETE /api/token/:id` 返回 `success:true`，两个 harness 各自断言 `left=0` 且连跑后 app 可见 token 只剩 2 条空名行（非 harness 造）。但表里有 `deleted_at`：实测 3 条 harness token 全部 `soft_deleted=t`。**数行数必须加 `deleted_at is null`**，否则会把墓碑当成泄漏——我自己就先误报了一次"库里还有 3 条" |
+| 我先前那条"分页导致删不掉"的诊断不完整 | 当时表里只有 4 行，列表接口其实能返回它。有效做法是 keyword 搜索 + DELETE + 复查，这条已实测；旧结论写在提交信息里作为过程记录，但以本行为准 |

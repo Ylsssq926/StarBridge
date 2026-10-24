@@ -287,10 +287,19 @@ async function main() {
 
   const cleanup = await api(`/api/channel/${channel.id}`, { method: 'DELETE' });
   record('cleanup channel deleted', cleanup.json.success === true, JSON.stringify(cleanup.json).slice(0, 80));
-  // Known, unfixed: this run's token is left behind (17 accumulate so far). A
-  // filter-and-delete loop over GET /api/token/ looks right but deletes nothing,
-  // because that endpoint is paginated and the new token is not on page one.
-  // Tracked in docs/ITERATION_PLAN.md as the harness cleanup convention.
+  // Harness cleanup convention: find the token by keyword (GET /api/token/ is
+  // paginated, so a plain list can miss a freshly created one) and delete it by
+  // id, then assert it is really gone. Measured: search?keyword= returns exactly
+  // the match and DELETE /api/token/:id answers success:true.
+  const found = await api(`/api/token/search?keyword=${encodeURIComponent(TOKEN_NAME)}`);
+  const tokenRows = Array.isArray(found.json.data) ? found.json.data : found.json.data?.items || [];
+  for (const stale of tokenRows.filter((t) => t?.name === TOKEN_NAME)) {
+    await api(`/api/token/${stale.id}`, { method: 'DELETE' });
+  }
+  const after = await api(`/api/token/search?keyword=${encodeURIComponent(TOKEN_NAME)}`);
+  const afterRows = Array.isArray(after.json.data) ? after.json.data : after.json.data?.items || [];
+  record('token cleaned up', afterRows.filter((t) => t?.name === TOKEN_NAME).length === 0, `left=${afterRows.length}`);
+
   for (const stray of await listChannels()) {
     if (['price-probe', CHANNEL_NAME, IMAGE_CHANNEL_NAME, REQUEST_CHANNEL_NAME].includes(stray.name)) {
       await api(`/api/channel/${stray.id}`, { method: 'DELETE' });
