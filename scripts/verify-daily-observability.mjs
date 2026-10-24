@@ -113,6 +113,14 @@ const detail = await api(`/api/channel/${channel.id}`);
 const settingJson = JSON.parse(detail.json.data?.setting || '{}');
 record('budget persisted on the channel', Number(settingJson.daily_request_limit) === 1, `daily_request_limit=${settingJson.daily_request_limit}`);
 
+// The relay needs a price for the model, otherwise every request stops at
+// model_price_error before channel selection happens.
+const priced = await api('/api/option/', {
+  method: 'PUT',
+  body: { key: 'ModelPrice', value: JSON.stringify({ [modelName]: 0.01 }) },
+});
+record('model price configured', priced.json.success === true, 'option=ModelPrice');
+
 // Channel selection reads from the channel cache, which syncs periodically: a
 // request issued immediately after creating a channel gets 503 model_not_found
 // (measured earlier: 503 at once, 200 after ~7s). Wait past one sync cycle.
@@ -142,7 +150,9 @@ const items = agg.json.data?.channels || [];
 record('aggregate endpoint lists this channel', agg.json.success === true && items.some((i) => i.channel_id === channel.id), `total=${items.length}`);
 record('aggregate payload carries no upstream key', !JSON.stringify(agg.json).includes('mock-key'), '');
 
-for (const stray of (await api('/api/channel/')).json.data.filter((c) => (c.models || '').includes(modelName))) {
+const freshList = await api('/api/channel/');
+const freshRows = Array.isArray(freshList.json.data) ? freshList.json.data : freshList.json.data?.items || [];
+for (const stray of freshRows.filter((c) => (c.models || '').includes(modelName))) {
   await api(`/api/channel/${stray.id}`, { method: 'DELETE' });
 }
 

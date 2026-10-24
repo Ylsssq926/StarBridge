@@ -33,7 +33,7 @@
 | `/users` `/redemption-codes` `/subscriptions` `/wallet` | 用户、兑换码、订阅、额度/支付 | 运营 |
 | `/keys` 之外还有 `/profile` | 个人资料、密码、2FA、Passkey、OAuth 绑定 | 账号自助 |
 | `/chat`、`/chat2link` | 内置会话与第三方客户端跳转配置 | 给使用者直接试 |
-| `/system-info` | 版本、数据库/缓存状态、性能 | 确认补丁版本（成品 0.2.0 显示 `0.2.0`） |
+| `/system-info` | 版本、数据库/缓存状态、性能 | 确认补丁版本（成品 0.3.0 显示 `0.3.0`） |
 | `/pricing`、`/pricing/<modelId>`、`/rankings`（公开） | 对外价格页与排行 | 客户端选型用 |
 
 > 表格来自 `web/src/routes/` 的实际路由与各界面 `section-registry.tsx` 的分节 id，不是照抄上游 README；系统设置页大多带 `$section` 子路径，例如实测见过的 `/system-settings/request-policies/routing`。
@@ -134,6 +134,14 @@ curl http://<host>:3800/v1/chat/completions \
 ./scripts/product.sh check-full  # 再加前端构建与类型检查
 ./scripts/product.sh status      # 与上游的落后程度 + 双向改动文件重叠面
 ./scripts/product.sh drill upstream/main   # 每月一次：重放 series + 构建/回归/类型门（非 0 就要人工处理）
+# 日预算可观测（只读，Admin/渠道读权限）
+curl -s -H "Authorization: Bearer <admin-token>" -H "New-Api-User: 1" \
+  http://localhost:3800/api/channel/daily_usage          # 所有有预算或用量的渠道
+curl -s -H "Authorization: Bearer <admin-token>" -H "New-Api-User: 1" \
+  http://localhost:3800/api/channel/daily_usage/<id>     # 单渠道：限额/已用/今日被跳过次数
+# rejects_today 是"被跳过的评估次数"上界（一次 429 可能记 2 次），用于发现"这条渠道今天被挡了多少"，
+# 不要当成 UV 级精确请求数；精确去重是后续项。
+
 # 端到端门禁：需要 compose 栈在跑，外加 node scripts/mock-upstream.cjs
 node scripts/verify-daily-limit.mjs     # 日限额边界端到端（含无 Redis、出图不计 token 等形态）
 node scripts/verify-compat.mjs          # 协议/接线

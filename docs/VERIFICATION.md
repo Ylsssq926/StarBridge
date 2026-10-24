@@ -319,4 +319,18 @@ rm docker-compose.poc.override.yml
 | 边界：计数器不在库里 | public schema 下不存在任何 `*daily*` / `*usage*` 表 → 当日额度只在 Redis/进程内；恢复库但不恢复 Redis 会把当天已用量清零（只影响预算保护，不影响计费，计费看 `logs`/`quota_data`） |
 
 SQLite 与 MySQL 的等价实测在 §4 的 `verify-minimal-deployment.mjs`（含 WAL 三文件拷贝的坑）。
-演练结束后旁路库与转储都已清理（PoC 栈里留了 3 条带预算的渠道作为下次演练的样本数据）。
+演练结束后旁路库与转储都已清理；演练期间种下的 3 条带预算渠道在后续 observability 端到端跑完后一并清掉，
+当前 PoC 库 `channels` 为空，这不影响上面任何一条结论（比对是"源库 vs 恢复库"，两边同一时刻快照）。
+
+## 15. 日预算可观测（用量 / 限额 / 拒绝次数）
+
+| 验证 | 结果 |
+|---|---|
+| 拒绝次数为何要自己计数 | 实测 `logs` 里 263 行（203 条消费 + 60 条错误）中**没有一行**与日限额有关 → 预算拒绝不落日志，想给运维看就必须自己计数 |
+| 计数落点 | 唯一决策点 `model.channelDailyLimitViolation`：缓存选路、候选集预筛、数据库选路都汇入这里，所以只加 1 处调用就覆盖三条路径，不需要动上游日志/错误处理 |
+| 计数器互不污染 | `TestChannelDailyRejectCounterDoesNotMoveUsage`：拒绝计数 2 次后 `tokens_used`/`requests_used` 仍为 0；id≤0 为 no-op（nil 渠道不会污染 key） |
+| 只读接口 | `GET /api/channel/daily_usage/:id` 与 `GET /api/channel/daily_usage`（`authz.ChannelRead`），返回限额 / 当日已用 / 当日被跳过次数，数据就是执行层正在读的那几个计数器，没有第二套真相 |
+| 端到端（0.3.0 镜像 + Postgres + Redis + mock 上游） | `node scripts/verify-daily-observability.mjs` **14/14**：预算 1 次请求的渠道第一次 200、第二次 **429 daily_request_limit_exceeded**；快照返回 `requests_used=1`、`rejects_today=2`、`daily_request_limit=1`；聚合列表含该渠道且 **payload 不含上游 key** |
+| 已知语义偏差 | `rejects_today` 是"**被跳过的评估次数**"而不是"被拒的请求数"：上面那次 429 记了 2（缓存路径里预筛与选后复检各记一次）。作为上界看是对的，要精确到请求数需要按 request id 去重——已记为后续项，不掩饰 |
+| 密钥卫生 | 聚合分支走 `GetAllChannels(0, -1, selectAll=false, ...)`，即 GORM `Omit("key")` 路径，密钥连内存都不加载；`Limit(-1)` 表示不分页而不是写死魔法数 |
+| 版本纪律 | 新增接口属内容变化 → `PRODUCT_VERSION` 0.2.0 → **0.3.0**，镜像重打为 `new-api-daily-limit:0.3.0` 与别名 `starbridge-gateway:0.3.0`（同一 tag 不覆盖内容）；`.gitattributes` 补 `PRODUCT_VERSION text eol=lf`，避免 Windows 检出 CRLF 把版本号读成带 `\r` 的 tag |
