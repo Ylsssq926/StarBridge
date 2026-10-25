@@ -30,7 +30,12 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Build main module
-        run: go build ./...
+        run: |
+          # main.go embeds web/dist, which is gitignored: a fresh checkout has no
+          # bundle. Upstream's ci.yml does the same placeholder before building.
+          mkdir -p web/dist
+          touch web/dist/index.html
+          go build ./...
       - name: Build relaykit module
         run: cd relaykit && GOWORK=off go build ./...
       - name: Daily limit unit tests
