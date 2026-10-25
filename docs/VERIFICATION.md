@@ -376,3 +376,14 @@ SQLite 与 MySQL 的等价实测在 §4 的 `verify-minimal-deployment.mjs`（�
 | 试过并**已回退**的请求级计数 | 做法是在 `service.dailyLimitExceededError` 里给对应渠道 +1，单测与类型门都过。端到端实测：429 真的发生了，`blocked_requests_today` 却是 **0** —— 因为「该模型/分组下所有候选都超额」这条最常见路径调用时 `channel` 是 `nil`（组级归因，我当时特意选择「不归属到某个渠道」），于是字段在主场景恒为 0，属于"看着正常其实不工作"的计数器。处理：整体回退（`grep blocked_requests_today` 在源码里为 0 处；镜像按回退后的源码重打，容器自报 0.4.0；harness 回到 17/17），不是留着让它显示 0。要做对需要请求作用域去重：把 request id 带进过滤器层，或在 service 层收集"本轮被预算挡掉的渠道 id"后统一计一次 —— 列入 P4，且明确它比看上去贵 |
 | 升级机制仍然成立 | 加完前端后重跑 `drill v1.0.0-rc.46`：overlap 0 → 重导 **40 个 patch（85 个功能文件，commits == series）** → 纯净 tag 上 `git am -3` 全部 Applying → renormalize → 构建 + common/model/service 回归 → 重放树内装依赖并 **`tsgo -b` 真跑** → `DRILL OK`（退出码 0）。即前端新增文件与三个被改的自有文件在纯净 rc.46 上也能重放并通过类型门 |
 | 面板改动后的全套复跑（0.4.0，2026-10-25） | `verify-daily-limit` **15/15**、`verify-compat` **8/8**、`verify-channel-types` 限额生效 **15/15 类型**，三者退出码均 0；跑完清掉 PoC 演示数据（`channels` 归 0、活 token 归 0），不给下一次演练留脏状态 |
+
+## 18. JSON 批量导入与账号类型口径（0.5.0）
+
+| 验证 | 结果 |
+|---|---|
+| 为什么是 JSON 而不是接口演练 | 用户反馈"接口我自己验不动，接入不都是 JSON 导的吗"。后端 `controller/channel.go:788` 的 `mode` 只支持 `single`/`batch`(同一模板多密钥)/`multi_to_single`，**没有**异构渠道列表导入接口；所以补的是 `scripts/import-channels.mjs`：读 JSON 数组，逐个走面板 API `POST /api/channel/`，密钥一律从 `key_env` 取 |
+| 导入正确性 | `channels.example.json`（15 条）在无任何环境密钥时 `--dry-run` 输出 `0 imported, 15 skipped, 0 failed`——缺密钥的条目被跳过而不是建成坏渠道；两条真实条目导入后 `2 imported, 0 failed`，且 `4242/9`、`/5` 两个预算原样落库 |
+| 顺带修掉自己接口的一个真缺陷 | `GET /api/channel/daily_usage/:id` 原本只读渠道缓存，而缓存有几秒同步延迟：刚导入的渠道立刻查会返回 `channel #N no longer exists`（实测复现）。改为缓存未命中回源 `model.GetChannelById(id, false)`（`false` 继续保证不把上游密钥读进内存）；重建 0.5.0 后**导入后立刻查** `success=true`、`limits=4242/9` 与 `0/5` |
+| Windows 退出码坑（影响可信度） | 脚本以 `process.exit()` 收尾时，Windows 上会在句柄未排空时触发 libuv 断言并把退出码污染成 127（明明 `2 imported, 0 failed`）。改为设置 `process.exitCode`，同一命令 `IMPORT_EXIT=0`。CI 在 Linux 上不受影响，但本机复跑不能再信退出码 |
+| 账号类型口径纠正 | 之前只写"Codex、Grok、Gemini、Kimi、MiniMax"，把旁路说窄了。按容器内源码补全并逐条给路径：Codex `auth/codex-oauth.js`、Claude `providers/claude/`、**Kiro** `providers/claude/claude-kiro.js` + `auth/kiro-oauth.js`、Gemini `providers/gemini/gemini-core.js`、**Antigravity** `providers/gemini/antigravity-core.js`、**GitHub Copilot** `providers/github/github-copilot-core.js`、Grok `auth/grok-auth.js`/`grok-cli-oauth.js`、iFlow `auth/iflow-oauth.js`、Qwen `auth/qwen-oauth.js`。渠道侧形状用 PoC 实测过的类型 1/14（`verify-compat` 8/8），不夸称 24 已验证 |
+| 回归 | 面板 + 导入器 + 缓存回源之后：`verify-daily-observability` **17/17**、Go 主模块与 relaykit 构建通过、PoC 自报 `0.5.0`、healthy |

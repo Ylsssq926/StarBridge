@@ -19,7 +19,7 @@
 
 | 旁路 | Kiro | Antigravity | 其他 | new-api 接入 | 许可 |
 |---|---|---|---|---|---|
-| AIClient2API | ✅ | ✅ | Codex、Grok、Gemini、Kimi、MiniMax | 类型 58/59，`http://aiclient2api:3000` | GPL-3.0 |
+| AIClient2API | ✅ | ✅ | 账号族（容器内源码为证）：OpenAI/Codex（`auth/codex-oauth.js`）、Claude（`providers/claude/`）、**Kiro**（`providers/claude/claude-kiro.js`、`auth/kiro-oauth.js`）、Gemini（`providers/gemini/gemini-core.js`、`auth/gemini-oauth.js`）、**Antigravity**（`providers/gemini/antigravity-core.js`）、**GitHub Copilot**（`providers/github/github-copilot-core.js`）、Grok（`auth/grok-auth.js`、`grok-cli-oauth.js`）、iFlow（`auth/iflow-oauth.js`）、Qwen（`auth/qwen-oauth.js`），另含 Kimi/MiniMax | 类型 1 / 14 指到 `http://aiclient2api:3000`（PoC 里 `verify-compat` 实测过的两种形状；58/59 也可用），账号在旁路自己的控制台选 | GPL-3.0 |
 | CLIProxyAPI | ❌ 核心不含 | ✅ | Codex、Claude Code、Gemini、Kimi、Grok | 类型 58/60，`http://<host>:8317` | MIT |
 | Sub2API | ❌ 核心不含 | ✅ | Claude、OpenAI、Gemini、Grok、账号池、计费 | 类型 59，`http://<host>:8080`；Antigravity 可用 `/antigravity` | LGPL-3.0 |
 | Kiro-Go | ✅ | ❌ | Kiro 单点 | 类型 1/14，`http://<host>:8080` | MIT |

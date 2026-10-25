@@ -45,6 +45,13 @@ func GetChannelDailyUsage(c *gin.Context) {
 			return
 		}
 		channel, err := model.CacheGetChannel(id)
+		if err != nil || channel == nil {
+			// Channel selection reads a cache that syncs on a delay, so a channel
+			// created seconds ago is legitimately missing from it. Observability
+			// must still answer for it, hence the direct DB read (selectAll=false
+			// keeps the upstream key out of memory).
+			channel, err = model.GetChannelById(id, false)
+		}
 		if err != nil {
 			common.ApiError(c, err)
 			return

@@ -33,7 +33,7 @@
 | `/users` `/redemption-codes` `/subscriptions` `/wallet` | 用户、兑换码、订阅、额度/支付 | 运营 |
 | `/keys` 之外还有 `/profile` | 个人资料、密码、2FA、Passkey、OAuth 绑定 | 账号自助 |
 | `/chat`、`/chat2link` | 内置会话与第三方客户端跳转配置 | 给使用者直接试 |
-| `/system-info` | 版本、数据库/缓存状态、性能 | 确认补丁版本（成品 0.4.0 显示 `0.4.0`） |
+| `/system-info` | 版本、数据库/缓存状态、性能 | 确认补丁版本（成品 0.5.0 显示 `0.5.0`） |
 | `/pricing`、`/pricing/<modelId>`、`/rankings`（公开） | 对外价格页与排行 | 客户端选型用 |
 
 > 表格来自 `web/src/routes/` 的实际路由与各界面 `section-registry.tsx` 的分节 id，不是照抄上游 README；系统设置页大多带 `$section` 子路径，例如实测见过的 `/system-settings/request-policies/routing`。
@@ -63,6 +63,21 @@
 ## 4. 接一个新源的标准动作
 
 1. `/channels` → 新建 → 选类型、填 Base URL + Key、填模型名（逗号分隔）、分组（如 `default`）。
+
+批量接入不用手点，也不用写 curl：改一个 JSON 文件，跑一条命令。
+
+```bash
+cp channels.example.json channels.json   # 按需改类型/模型名/分组/两个日预算
+export DEEPSEEK_API_KEY=... MOONSHOT_API_KEY=... AICLIENT2API_KEY=...
+node scripts/import-channels.mjs channels.json --dry-run   # 先看会做什么
+node scripts/import-channels.mjs channels.json             # 真正导入
+```
+
+规则：密钥只从环境变量取（`key_env`），文件里不写字面密钥，缺密钥的条目报 SKIP 而不会建成坏渠道；
+同名渠道默认跳过，要覆盖加 `--update-existing`；`channels.example.json` 里已覆盖国内主流厂商
+（DeepSeek / Kimi / 智谱 / 通义 / 豆包 / 文心 / 混元 / MiniMax / SiliconFlow）、旁路账号族
+（Codex / Claude / Kiro / Gemini / Antigravity / GitHub Copilot / Grok / iFlow / Qwen）、
+以及生图任务插件与自建 vLLM。
 2. 需要限流就在「其他设置」里填「每日 Token 限额」和/或「每日请求数限额」。账号型上游建议两个都设：token 限额挡住文本刷量，请求数限额挡住生图/视频这类不回报 token 的消耗。
 3. `/system-settings/models` 里确认这些模型有倍率或按次价格。
 4. `/playground` 选该渠道对应的分组与模型，发一条测试。

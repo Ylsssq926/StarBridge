@@ -1,0 +1,152 @@
+[
+  {
+    "name": "deepseek-official",
+    "type": 43,
+    "base_url": "",
+    "models": "deepseek-chat,deepseek-reasoner",
+    "group": "default",
+    "priority": 10,
+    "weight": 0,
+    "key_env": "DEEPSEEK_API_KEY",
+    "setting": { "daily_token_limit": 2000000, "daily_request_limit": 0 }
+  },
+  {
+    "name": "moonshot-kimi",
+    "type": 25,
+    "base_url": "",
+    "models": "moonshot-v1-8k,moonshot-v1-32k,kimi-k2-0905-preview",
+    "group": "default",
+    "priority": 9,
+    "key_env": "MOONSHOT_API_KEY",
+    "setting": { "daily_token_limit": 1000000, "daily_request_limit": 0 }
+  },
+  {
+    "name": "zhipu-glm",
+    "type": 16,
+    "base_url": "",
+    "models": "glm-4-plus,glm-4-air,cogview-3-plus",
+    "group": "default",
+    "priority": 8,
+    "key_env": "ZHIPU_API_KEY",
+    "setting": { "daily_token_limit": 1000000, "daily_request_limit": 200 }
+  },
+  {
+    "name": "aliyun-qwen",
+    "type": 17,
+    "base_url": "",
+    "models": "qwen-plus,qwen-turbo,qwen-vl-max",
+    "group": "default",
+    "priority": 8,
+    "key_env": "DASHSCOPE_API_KEY",
+    "setting": { "daily_token_limit": 1000000 }
+  },
+  {
+    "name": "volcengine-doubao",
+    "type": 45,
+    "base_url": "",
+    "models": "doubao-pro-32k,doubao-1-5-pro-32k-250115",
+    "group": "default",
+    "priority": 7,
+    "key_env": "ARK_API_KEY"
+  },
+  {
+    "name": "baidu-ernie",
+    "type": 46,
+    "base_url": "",
+    "models": "ernie-4.0-8k,ernie-speed-128k",
+    "group": "default",
+    "priority": 6,
+    "key_env": "QIANFAN_API_KEY"
+  },
+  {
+    "name": "tencent-hunyuan",
+    "type": 23,
+    "base_url": "",
+    "models": "hunyuan-lite,hunyuan-standard",
+    "group": "default",
+    "priority": 6,
+    "key_env": "TENCENT_SECRET_ID"
+  },
+  {
+    "name": "minimax-abab",
+    "type": 35,
+    "base_url": "",
+    "models": "MiniMax-Text-01,abab6.5s-chat",
+    "group": "default",
+    "priority": 5,
+    "key_env": "MINIMAX_API_KEY"
+  },
+  {
+    "name": "siliconflow-openai-compatible",
+    "type": 40,
+    "base_url": "",
+    "models": "Qwen/Qwen2.5-72B-Instruct,deepseek-ai/DeepSeek-V3",
+    "group": "default",
+    "priority": 4,
+    "key_env": "SILICONFLOW_API_KEY"
+  },
+  {
+    "name": "aiclient2api-account-pool",
+    "type": 1,
+    "base_url": "http://aiclient2api:3000",
+    "models": "gpt-4.1,claude-sonnet-4-20250514,gemini-2.5-pro",
+    "group": "default",
+    "priority": 3,
+    "key_env": "AICLIENT2API_KEY",
+    "remark": "One endpoint, many account types: pick the account (Codex / Grok / Gemini / Kiro / Antigravity / GitHub Copilot / iFlow / Qwen / Claude) inside AIClient2API's own console on 127.0.0.1:3100, never exposed publicly. Keep this gateway key cheap: the upstream is a personal subscription.",
+    "setting": { "daily_token_limit": 500000, "daily_request_limit": 300 }
+  },
+  {
+    "name": "aiclient2api-anthropic-shape",
+    "type": 14,
+    "base_url": "http://aiclient2api:3000",
+    "models": "claude-sonnet-4-20250514",
+    "group": "default",
+    "priority": 2,
+    "key_env": "AICLIENT2API_KEY",
+    "remark": "Same pool, Anthropic request shape, for clients that speak /v1/messages natively.",
+    "setting": { "daily_request_limit": 200 }
+  },
+  {
+    "name": "sub2api-console-accounts",
+    "type": 59,
+    "base_url": "http://sub2api:8080",
+    "models": "gpt-5.1,claude-opus-4-1-20250805",
+    "group": "default",
+    "priority": 2,
+    "key_env": "SUB2API_KEY",
+    "remark": "Subscription-account pooling sidecar; its console stays on localhost.",
+    "setting": { "daily_request_limit": 100 }
+  },
+  {
+    "name": "gateway-of-gateways",
+    "type": 60,
+    "base_url": "http://other-gateway:3000",
+    "models": "kimi-k2-0905-preview,glm-4.5",
+    "group": "default",
+    "priority": 1,
+    "key_env": "PEER_GATEWAY_KEY",
+    "remark": "Chain another StarBridge/new-api deployment when you already run one."
+  },
+  {
+    "name": "ali-wan-image-plugin",
+    "type": 61,
+    "base_url": "",
+    "models": "wan2.2-t2i-flash,qwen-image",
+    "group": "default",
+    "priority": 5,
+    "key_env": "DASHSCOPE_API_KEY",
+    "remark": "Built-in task plugin for image generation: per-call billing reports no tokens, so the request budget is what protects it.",
+    "setting": { "daily_request_limit": 200, "task_plugin_key": "alibaba" }
+  },
+  {
+    "name": "self-hosted-vllm",
+    "type": 62,
+    "base_url": "http://vllm-host:8000/v1",
+    "models": "Qwen3-32B",
+    "group": "internal",
+    "priority": 10,
+    "key_env": "VLLM_API_KEY",
+    "setting": { "daily_token_limit": 5000000 }
+  }
+]
