@@ -71,13 +71,18 @@ jobs:
         run: |
           # 上游整树 lint 本身有既存告警（基线 rc.46 与本树都是 66 warnings / 158 errors），
           # 所以门禁只要求"我们碰过的文件"保持 0/0，避免把上游债务背进私有补丁。
-          # 两处必须 fail-closed，因为这一版曾经静默通过：
+          # 三处必须 fail-closed，因为这一版曾经静默通过：
           #   1) `|| true` 挂在取 diff 的行上，tag 缺失时打印 "no files changed" 就算过；
           #   2) pathspec 相对当前目录，working-directory 是 web 时 'web/src' 指的是
-          #      web/web/src，永远为空 —— 用 ':/…' 锚到仓库根。
+          #      web/web/src，永远为空 —— 用 ':/…' 锚到仓库根；
+          #   3) 本仓没有上游 tag（git ls-remote --tags 为 0 条），fetch-depth: 0 也带不来。
+          #      基线 ref 统一由同步脚本的 upstream remote 机制取回，与本仓其他门禁同源，
+          #      不在这里另抄一份 URL 或改成"没有 tag 就跳过"。
+          git rev-parse --verify -q "$UPSTREAM_BASE^{commit}" >/dev/null \
+            || ../scripts/upstream-sync.sh status
           git rev-parse --verify "$UPSTREAM_BASE^{commit}" >/dev/null || {
-            echo "ERROR: base tag $UPSTREAM_BASE is not in this checkout; the lint gate" >&2
-            echo "       cannot tell our files from upstream's. Fix the checkout, don't skip it." >&2
+            echo "ERROR: base tag $UPSTREAM_BASE is unavailable; the lint gate" >&2
+            echo "       cannot tell our files from upstream's. Fix the fetch, don't skip it." >&2
             exit 1
           }
           changed=$(git diff --name-only "$UPSTREAM_BASE"..HEAD -- ':/web/src')
