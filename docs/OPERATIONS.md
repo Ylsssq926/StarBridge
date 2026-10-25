@@ -134,6 +134,7 @@ curl http://<host>:3800/v1/chat/completions \
 ./scripts/product.sh check-full  # 再加前端构建与类型检查
 ./scripts/product.sh status      # 与上游的落后程度 + 双向改动文件重叠面
 ./scripts/product.sh drill upstream/main   # 每月一次：重放 series + 构建/回归/类型门（非 0 就要人工处理）
+./scripts/linux-gate.sh       # 跨平台门禁：在 node/golang 容器里重跑 shell+harness+后端回归（本机是 Windows，CI 是 Linux）
 # 日预算可观测（只读，Admin/渠道读权限）
 curl -s -H "Authorization: Bearer <admin-token>" -H "New-Api-User: 1" \
   http://localhost:3800/api/channel/daily_usage          # 所有有预算或用量的渠道

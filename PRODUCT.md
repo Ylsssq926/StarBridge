@@ -43,6 +43,7 @@
 | `scripts/verify-channel-types.mjs` | 逐上游类型的面板适配与限额生效检查 |
 | `scripts/verify-minimal-deployment.mjs` | 最小部署形态实测（无 Redis、无内存缓存）：`/setup` 首启 + 两个日限额，SQLite/MySQL 已各 10/10 |
 | `scripts/backup-drill.sh` | 备份恢复演练（Postgres）：转储 → 旁路库恢复 → 逐表行数比对 → 用恢复库起容器探活；只读生产库，删库名有 `nap_restore_*` 守卫 |
+| `scripts/linux-gate.sh` | 跨平台门禁：在 `node:24` 与 `golang:1.26` 容器里重跑 shell/harness 语法、`upstream-sync status` 与后端构建+定向回归（本机是 Windows，CI 是 Linux） |
 | `patches/series/` | **主机制**：由分支提交生成的 patch series（`git am -3` 重放） |
 | `patches/legacy/` | pre-commit 基线的手工 file patch，仅供 `USE_SERIES=0` 回退与历史对照 |
 
