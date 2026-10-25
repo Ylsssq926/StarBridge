@@ -43,25 +43,31 @@ jobs:
           # git am 需要 committer 身份，runner 默认没有。
           git config user.name "Upstream Drill"
           git config user.email "ci@invalid"
+          # 日志必须落在 logs/：它既在 .gitignore 里，也已声明为同步脚本的 ARTIFACT_DIRS。
+          # 第一版写在仓库根的 drill.log，被 export-series 的 fail-closed 守卫当成
+          # "未提交的职能改动"而拒绝（run 40191317746 实测 drill_exit=1，2 秒就退出，
+          # 根本没走到重放）。守卫是对的，写错位置的是这里。
+          mkdir -p logs
+          LOG=logs/drill.log
           status=0
           ./scripts/upstream-sync.sh drill "${{ inputs.ref || 'upstream/main' }}" \
-            > drill.log 2>&1 || status=$?
-          echo "drill_exit=$status" >> drill.log
-          tail -40 drill.log
+            > "$LOG" 2>&1 || status=$?
+          echo "drill_exit=$status" >> "$LOG"
+          tail -40 "$LOG"
           # 让这一步自己保留失败状态（显示 ⚠），但 job 因为 continue-on-error 仍然绿。
           exit "$status"
       - name: Summarise
         if: always()
         run: |
+          LOG=logs/drill.log
           {
             echo "## Upstream drill against the newest main"
             echo '```'
-            grep -E 'drill_exit=|DRILL (OK|FAILED)|overlap with|Patch failed|conflicted files:' drill.log || true
-            grep -E '^  [a-zA-Z0-9_./-]+$' drill.log | sort -u | head -20 || true
+            grep -E 'drill_exit=|DRILL (OK|FAILED)|overlap with|Patch failed|conflicted files:|^ +[a-zA-Z0-9_./-]+$' "$LOG" || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: drill-log
-          path: drill.log
+          path: logs/drill.log
