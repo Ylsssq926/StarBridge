@@ -1,8 +1,9 @@
 name: Upstream Drill
 # 每月把本方 series 重放到最新上游 main 并跑门禁。它**不是**发布门禁：演练失败
 # 是"这一版要人工处理"的信号，所以不刷红，只把结论写进 summary 与产物日志。
-# 注意：schedule 只在仓库默认分支上生效；product 分支还不是默认分支时，
-# 用 workflow_dispatch 手动跑（或把该分支设为默认）。
+# schedule 只在默认分支上生效——`product/daily-limit` 已是本仓默认分支，所以这条定时
+# 会跑。但 GitHub 只在工作流被"注册"后才列得出来：本文件推进去后 `GET /actions/workflows`
+# 仍看不到它（因此尚未有过一次真实触发），改动本文件并推送即为注册时机。
 on:
   schedule:
     - cron: "0 3 5 * *"

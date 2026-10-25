@@ -213,12 +213,31 @@ docker start new-api-poc
 ## 9. 公开前自检（每次准备推到公开仓库之前跑一遍）
 
 ```bash
-git log -p <上游基线>..HEAD | grep -inE "sk-[A-Za-z0-9]{16,}|ghp_|gho_|-----BEGIN|AKIA[0-9A-Z]{16}" | head
-git grep -ln "Jonathan\|C:/Users" -- .            # 本地路径/用户名
+# 这些扫描命令本身写在本文档里，会和自己的文本撞上（本次实测就撞了两次），
+# 所以统一排除本文档；否则一条真泄漏会被淹没在"文档命中文档"的噪声里。
+EX=':(exclude)docs/OPERATIONS.md'
+BASE=v1.0.0-rc.46
+git rev-list --count "$BASE"..HEAD          # 私有提交数，以输出为准，别把本文里的数字当常量
+git log -p "$BASE"..HEAD -- . "$EX" | grep -inE "sk-[A-Za-z0-9]{16,}|ghp_|gho_|-----BEGIN|AKIA[0-9A-Z]{16}" | head
+git grep -ln "Jonathan\|C:/Users" -- . "$EX"   # 本地路径/用户名
 git grep -l "^\.env$\|backups/" ; git ls-files | grep -iE "\.env$|\.pem$|id_rsa"   # 密钥与备份产物是否被跟踪
-git remote -v | grep -iE "ghp_|gho_|:[^/]*@"      # remote URL 里的 token
+git remote -v | grep -iE "ghp_|gho_|:[^/]*@"   # remote URL 里的 token
 ```
 
-2026-10-25 实测结果：我们 45 个提交的 diff 里没有高熵凭据；`.env`、`backups/`、`patches/series/` 均未被跟踪；无 `.pem`/私钥文件；remote URL 不含 token；跟踪文件里没有本地用户名或绝对路径。唯一命中项 `relay/channel/tencent/dispatch_test.go` 是上游自带文件（测试用假值，本来就公开在上游）。
+2026-10-25 复跑（50 个私有提交）：排除本文档后四条扫描全部零命中；`.env`、`backups/`、`patches/series/` 均未被跟踪；无 `.pem`/私钥文件；remote URL 不含 token。不排除本文档时，唯一命中项就是上面那两行扫描命令自身——已写成 `$EX` 固定下来。公开前首跑的结论仍然成立：唯一看起来像密钥的命中 `relay/channel/tencent/dispatch_test.go` 是上游自带文件（测试用假值，本来就公开在上游）。
 
 需要知道但不算泄漏的两类值：`rootpass123` 与 `newapi` 是 **PoC 本地栈的默认口令**（出现在 5 个 harness 脚本与本文档里，可用 `NEW_API_ADMIN_USER/NEW_API_ADMIN_PASS` 覆盖）；真实部署的管理员账号是首次访问 `/setup` 时由你自己设的，成品 `.env.product.example` 里三个密钥字段都是 `change-me` 占位。推公开仓库前请确认：不要把线上 `.env` 复制进仓库，也不要复用 PoC 默认口令。
+
+## 10. 公开仓库自身的运维（不是网关的运维）
+
+这一节管的是仓库、门禁与依赖机器人；上一节管的是"推之前查什么"。
+
+| 事项 | 现状与操作 |
+|---|---|
+| 远端与分支 | 开发远端 `starbridge` = 公开仓库，默认分支 `product/daily-limit`。`origin` 仍指上游 `QuantumNous/new-api`，**永远不要往它推**。日常就是 `git push starbridge product/daily-limit` |
+| 没有 tag，且这是有意的 | `git ls-remote --tags starbridge` 为 0 条：只推分支，上游的 release tag 不在公开仓里复制一份。副作用是 CI 不能假设检出自带基线 ref——`product-gates.yml` 的前端门因此改为复用同步脚本的 upstream remote 取回基线（见 `docs/VERIFICATION.md` §19） |
+| 分支保护 | 已开：禁 force-push、禁删除分支、对 admin 生效；**不**要求 PR、**不**要求必需状态检查（所以直推仍可用）。回退一条命令：`gh api -X DELETE repos/Ylsssq926/StarBridge/branches/product/daily-limit/protection`；查看：`gh api repos/Ylsssq926/StarBridge/branches/product/daily-limit/protection` |
+| 门禁怎么跑 | 只有 `.github/workflows/product-gates.yml`（`backend` / `frontend` / `sync-integrity` 三个并行 job）是我们自己的门；上游 `ci.yml` 的 `CI` 也会跑，两边互补。手动触发：`gh workflow run product-gates.yml --repo Ylsssq926/StarBridge --ref product/daily-limit`（注意用**文件名**不是显示名，并显式给 `--repo`，否则 `gh` 会解析到 `origin`） |
+| 打 tag 之前要先想清楚 | 继承自上游的 `docker-build.yml`、`release.yml`、`electron-build.yml` 都在 `on: push: tags` 上（各自排除规则不同：`!nightly*` / `!*-alpha*` / `!*-*`）。我们现在一个 tag 都没打，所以它们还没被 GitHub 注册；一旦为了发版打 `v0.5.0` 这类 tag，这三条会立刻开始跑，用的是本仓库的 secrets（当前为空 → 只会红，不会误发布，但噪声大且语义上不是我们的发布链）。要发版就先按 `gh api repos/Ylsssq926/StarBridge/actions/workflows` 找到它们的 id 再 `POST .../disable` |
+| Dependabot | 配置也是上游带过来的，现在对着我们的默认分支开 PR。**它的红是有效信号**：PR #5（jsdom 29→30）被我们的 `vitest run src/features/channels` 拦在 `priority-order.test.tsx:687`，挂的是上游既存测试；同一 run 里上游 backend job 是绿的。所以别把门禁当噪声合掉，也别顺手关掉机器人——它是目前唯一在替我们盯依赖面的人 |
+| 定时演练 | `upstream-drill.yml`（每月 5 日 03:00 UTC，`continue-on-error: true`，结论写进 job summary 与 `drill-log` 产物）。它在远端默认分支的树里，但 GitHub 还没注册它（`GET /actions/workflows` 只列 CI / Product Gates / Dependabot），因此**还没有一次真实触发**；改动该文件并推送后，用 `gh workflow run upstream-drill.yml --repo Ylsssq926/StarBridge` 实跑一次确认 |

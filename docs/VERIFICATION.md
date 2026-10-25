@@ -387,3 +387,23 @@ SQLite 与 MySQL 的等价实测在 §4 的 `verify-minimal-deployment.mjs`（�
 | Windows 退出码坑（影响可信度） | 脚本以 `process.exit()` 收尾时，Windows 上会在句柄未排空时触发 libuv 断言并把退出码污染成 127（明明 `2 imported, 0 failed`）。改为设置 `process.exitCode`，同一命令 `IMPORT_EXIT=0`。CI 在 Linux 上不受影响，但本机复跑不能再信退出码 |
 | 账号类型口径纠正 | 之前只写"Codex、Grok、Gemini、Kimi、MiniMax"，把旁路说窄了。按容器内源码补全并逐条给路径：Codex `auth/codex-oauth.js`、Claude `providers/claude/`、**Kiro** `providers/claude/claude-kiro.js` + `auth/kiro-oauth.js`、Gemini `providers/gemini/gemini-core.js`、**Antigravity** `providers/gemini/antigravity-core.js`、**GitHub Copilot** `providers/github/github-copilot-core.js`、Grok `auth/grok-auth.js`/`grok-cli-oauth.js`、iFlow `auth/iflow-oauth.js`、Qwen `auth/qwen-oauth.js`。渠道侧形状用 PoC 实测过的类型 1/14（`verify-compat` 8/8），不夸称 24 已验证 |
 | 回归 | 面板 + 导入器 + 缓存回源之后：`verify-daily-observability` **17/17**、Go 主模块与 relaykit 构建通过、PoC 自报 `0.5.0`、healthy |
+
+## 19. 发布到公开仓库与真实 runner 门禁（0.5.0，2026-10-25）
+
+之前所有"绿"都来自本机（Windows + Git Bash + 本地容器）。§16 明确把"没在 GitHub hosted
+runner 上跑过 workflow"列为未验证项；本轮推上公开仓库后，runner 连着把三个只有它才能发现的
+问题顶了出来。
+
+| 验证 | 结果 |
+|---|---|
+| 发布形态 | 远端 `starbridge` = `https://github.com/Ylsssq926/StarBridge.git`，公开，默认分支 `product/daily-limit`。推的是分支本体（含上游完整历史与全部署名/`LICENSE`/`NOTICE`），**一条 tag 都没推**：`git ls-remote --tags starbridge` 返回 0 条。这条事实后来直接决定了 CI 的一处修法 |
+| runner 暴露差异 ①：`go:embed` | `main.go:44:12: pattern web/dist: no matching files found` —— `web/dist` 是 gitignore 的产物，干净检出里没有。按上游 `ci.yml` 同样做法先建占位再 `go build`（commit `cf30bea32`） |
+| runner 暴露差异 ②：可执行位 | `Permission denied` / 退出码 126。Windows 上 git 不记录 `chmod +x`，5 个 `.sh` 全以 `100644` 入库。用 `git update-index --chmod=+x` 索引进 `100755`（commit `5270aa195`），本地 `git ls-files -s` 复核 |
+| **两处静默失效**（只有 runner 能发现） | 「按我们改过的文件 lint」这道门**从写下到本次一次也没跑过**：(a) 浅克隆没有 `v1.0.0-rc.46`，`git diff` 报 `fatal: bad revision` 却被行尾 `|| true` 吞掉，于是打印 `no frontend files changed` 并绿；(b) pathspec 相对当前目录，而 `working-directory` 已是 `web`，`'web/src'` 实指 `web/web/src`，永远为空。修法：checkout 加 `fetch-depth: 0`；基线 ref 复用同步脚本的 upstream remote（不在 CI 里另抄上游 URL）；pathspec 改 `:/web/src` 锚到仓库根；拿不到基线就 `exit 1` 而不是跳过 |
+| 跨 job 的 artifact 是假的 | `sync-integrity` 报 `Artifact not found: web-dist`：frontend job 根本没有构建步骤，上传的 `web/dist` 是空目录（annotate 早写了 `No files were found with the provided path`）。重放树只需要一个非空 embed 目录 → 自建占位，并删掉 `needs: frontend`，三个 job 并行 |
+| 补一道上游没有的门 | 上游 `ci.yml` 前端只做 typecheck + test，生产包要到镜像构建才第一次被编译。新增 `bun run build` 并断言 `dist/index.html` 存在（本地与 runner 均退出码 0；产物 67411.1 kB / gzip 20727.6 kB） |
+| 三 job 全绿（run `40190182183`→ 修复后 `40190561094`，push 触发） | `backend` 30s、`frontend` 2m32s、`sync-integrity` 1m19s。**按日志逐条确认它们真做了事**：`linting 9 file(s) we touched` → `Found 0 warnings and 0 errors`；`rsbuild build` 产出 `dist/index.html`；重放树里 `==> typecheck: ran`；`export-series: OK (commits == series)`（49 patch / 87 功能文件）；`docker compose config --quiet` 通过 |
+| Dependabot PR 上的红是有效信号，不是噪声 | PR #5（jsdom 29→30）在我们 `vitest run src/features/channels` 里挂在 `priority-order.test.tsx:687`，即**上游既存测试**被这次升级打挂；同一 run 里上游自己的 backend job 是绿的。这条门拦下了一次不该合的升级 |
+| 分支保护 | 已开：`allow_force_pushes=false`、`allow_deletions=false`、`enforce_admins=true`；`required_status_checks=null`、`required_pull_request_reviews=null`（仍能直接推分支，只是不能覆盖历史/删分支）。按 `GET /branches/…/protection` 回读确认；**没有**用真实 force-push 去"试"——那会真把已发布历史覆盖掉。回退：`gh api -X DELETE repos/Ylsssq926/StarBridge/branches/product/daily-limit/protection` |
+| 这一段不证明的事 | `Upstream Drill` 这条 workflow 文件在远端默认分支的树里，但 GitHub 尚未注册它（`GET /actions/workflows` 只列 CI / Product Gates / Dependabot），所以月度定时任务**还没有一次真实触发**；self-hosted / ARM runner、发布（Release、镜像仓库推送）、Actions 计费与缓存命中率都未测；Dependabot 其余 4 个 PR 的门禁结果还没在新版本 workflow 下重跑 |
+
