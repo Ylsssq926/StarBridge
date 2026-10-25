@@ -338,3 +338,24 @@ SQLite 与 MySQL 的等价实测在 §4 的 `verify-minimal-deployment.mjs`（�
 | harness 会自我阻塞（会话限制） | PoC 限制单会话：上一次运行不 logout，下一次登录直接 `AUTH_SESSION_LIMIT / Conflict`（实测撞到过）。harness 末尾补 best-effort 退出后，连跑两次均可登录 |
 | harness 收尾：搜索式删除有效，但 token 是**软删除** | `GET /api/token/` 与 `/api/token/search?keyword=` 返回 `{page,page_size,total,items}`；按 keyword 找到 id 后 `DELETE /api/token/:id` 返回 `success:true`，两个 harness 各自断言 `left=0` 且连跑后 app 可见 token 只剩 2 条空名行（非 harness 造）。但表里有 `deleted_at`：实测 3 条 harness token 全部 `soft_deleted=t`。**数行数必须加 `deleted_at is null`**，否则会把墓碑当成泄漏——我自己就先误报了一次"库里还有 3 条" |
 | 我先前那条"分页导致删不掉"的诊断不完整 | 当时表里只有 4 行，列表接口其实能返回它。有效做法是 keyword 搜索 + DELETE + 复查，这条已实测；旧结论写在提交信息里作为过程记录，但以本行为准 |
+
+## 16. 跨平台门禁（Linux 容器，2026-10-25）
+
+本机是 Windows + Git Bash，而 CI 与生产都在 Linux。之前所有"绿"都只在 Windows 上取过证，
+所以把工具层与后端层放进容器重跑一遍（挂载同一份工作树，只读证据，不改仓库）：
+
+| 层 | 命令 | 结果 |
+|---|---|---|
+| shell 语法 | `bash -n` × 4（`upstream-sync.sh` / `product.sh` / `backup-drill.sh` / `build-image.sh`），`node:24-bookworm` | `BASH_SYNTAX_OK_LINUX` |
+| harness 语法 | `node --check` × 5 个 `.mjs` | `NODE_CHECK_OK_LINUX` |
+| 同步脚本 | `./scripts/upstream-sync.sh status` | 与 Windows 输出一致：落后 23、自有 36、**overlap 18 个文件**（`comm`/`sort` 无平台差异） |
+| 后端 | `golang:1.26-bookworm`，`go1.26.10 linux/amd64`：`go build ./...`、`relaykit` 独立构建、`go test ./common -run Daily`、`go test ./model -run 'Daily\|FilterCandidate\|TaskPlugin'` | 全绿（退出码 0） |
+
+两个只有跨平台才暴露的坑（都已写进用法）：
+
+- Git Bash 会把 `docker run -w /repo` 的参数改写成 `C:/Program Files/Git/repo`，必须 `MSYS_NO_PATHCONV=1`。
+  这与 `backup-drill.sh` 里 `pg_dump --file=/tmp/...` 被改写成 Windows 路径是同一类问题。
+- `golang` 镜像里用 `bash -lc` 会重置 PATH，`go` 反而找不到（实测退出码 127），要用 `bash -c` 并显式带上 `/usr/local/go/bin`。
+
+**这一段不证明的事**：没在 GitHub hosted runner 上跑过 workflow（缓存、setup 版本、artifact 传递仍是未验证项）；
+前端 `typecheck`/`vitest` 与 compose 全栈仍只在 Windows 上验过；`verify-*.mjs` 端到端依赖本机已起的 PoC 栈，未在 Linux 里重建。
