@@ -133,11 +133,14 @@ docker compose -f docker-compose.poc.yml up -d
 详见 [docs/ITERATION_PLAN.md](docs/ITERATION_PLAN.md)。当前 v0.4.0 已完成：
 
 - 上游基线重建
-- 日限额后端 + 前端 + 测试
+- 日限额后端 + 前端 + 测试（Token 预算与请求数预算两个维度，含生图/按次计费任务）
+- 面板内显示当日预算消耗（渠道抽屉「其他设置」页签：已用/限额/今日被跳过的选路次数）
 - 三条旁路容器验证
 - 内置阿里图片插件 mock 验证
 - compose 起停与容器网络验证
-- patch 跨 rc.46 / main 重放验证
+- patch 跨 rc.46 / main 重放验证；每月跟进收敛为一条 `drill` 命令
+- 备份恢复演练（Postgres：转储 → 旁路库恢复 → 逐表行数比对 → 用恢复库起服务探活）
+- 跨平台门禁（Linux 容器内重跑工具层与后端回归）
 
 ## 上游更新
 
