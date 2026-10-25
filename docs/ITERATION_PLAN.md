@@ -38,8 +38,10 @@ git push starbridge product/daily-limit          # 触发 Product Gates，在真
    冲突（已解，都在 `model/channel_constraint.go`）加上游把前端类型入口换成 `bun check -b`。
    落地方式二选一：开 `product/rc47` 新分支（加性，不动已发布历史），或改写现有分支基线
    （需要 force-push，当前分支保护会拒绝——这是有意的）。
-3. 跟进机制本身还差两步：本机 bun 需升级才能跑 rc.47 的类型门；`cmd_check` 的类型门探针
-   只认 `tsgo` 二进制，上游一换入口就会把"没跑成"报成"门禁坏了"，应改成跑脚本并按错误分类。
+3. 本机 bun 仍是 1.3.14，跑不了上游新入口 `bun check -b`，所以对 rc.47/main 的**本地**类型门
+   要么升级 bun（你机器上的全局改动，我没替你做），要么显式 `SKIP_TYPECHECK=1` 并由 CI 覆盖。
+   （原并列的第二项"`cmd_check` 只认 `tsgo` 二进制"已在本轮改掉：现在按 `web/package.json` 的
+   `typecheck` 脚本决定跑什么，并分开报"没跑成"与"类型不过"，两类都非 0 退出。）
 
 已知偏差，别当成已修：`reject_selection_attempts_today` 单位是选路尝试（默认配置下 1 个被挡请求计 2 次），
 精确到请求级需按 request 去重；`upstream/main` 与 rc.47 一样把前端类型入口改成了 `bun check -b`（本机 bun 1.3.14 跑不了），
