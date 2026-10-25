@@ -30,21 +30,21 @@ git push starbridge product/daily-limit          # 触发 Product Gates，在真
 （已进渠道抽屉面板）、JSON 批量导入渠道、GitHub hosted runner 上的三 job 门禁。
 逐条证据在 `docs/VERIFICATION.md` §3/§4/§14/§15/§16/§17/§18/§19/§20。
 
-仍未闭环、且不能由我自行闭环的三类：
+仍未闭环、且不能由我自行闭环的两类：
 
 1. 真实 Kiro/Antigravity 账号、真实国内厂商 Key 与真实出图 —— 需要凭据（任务 #9/#11）。
-2. **要不要把基线从 rc.46 挪到 rc.47，是产品决定不是技术问题。** 我已在本地把 53 个 patch
-   重放到 rc.47 并跑通后端与三组回归（见 `docs/VERIFICATION.md` §20）：唯一障碍是 1 个文件 2 处
-   冲突（已解，都在 `model/channel_constraint.go`）加上游把前端类型入口换成 `bun check -b`。
-   落地方式二选一：开 `product/rc47` 新分支（加性，不动已发布历史），或改写现有分支基线
+2. **基线要不要从 rc.46 搬到 rc.47，仍是产品决定；但技术阻塞已经清空。** 本机 bun 已升到 1.4.4，
+   上游新入口 `bun check -b` 在 rc.47 树上实测跑绿；后端构建与三组回归也绿；冲突只有
+   `model/channel_constraint.go` 的 1 个文件 2 处（已解）。剩下的唯一前置是机制性的：
+   `UPSTREAM_BASE` 现在硬编码在两个 workflow 与文档里，直接推 rc.47 基线的分支会让
+   `commits == series` 把上游自己的提交算成我方提交、门禁立刻失真。所以顺序必须是
+   ① 把基线 ref 改成"每条分支一个来源"（脚本默认 + workflow 读取）→ ② 推 `product/rc47`
+   看 CI 全绿 → ③ 才谈切换默认分支与是否跳成品版本。落地方式二选一：开 `product/rc47` 新分支
+   （加性，不动已发布历史），或改写现有分支基线
    （需要 force-push，当前分支保护会拒绝——这是有意的）。
-3. 本机 bun 仍是 1.3.14，跑不了上游新入口 `bun check -b`，所以对 rc.47/main 的**本地**类型门
-   要么升级 bun（你机器上的全局改动，我没替你做），要么显式 `SKIP_TYPECHECK=1` 并由 CI 覆盖。
-   （原并列的第二项"`cmd_check` 只认 `tsgo` 二进制"已在本轮改掉：现在按 `web/package.json` 的
-   `typecheck` 脚本决定跑什么，并分开报"没跑成"与"类型不过"，两类都非 0 退出。）
 
 已知偏差，别当成已修：`reject_selection_attempts_today` 单位是选路尝试（默认配置下 1 个被挡请求计 2 次），
-精确到请求级需按 request 去重；`upstream/main` 与 rc.47 一样把前端类型入口改成了 `bun check -b`（本机 bun 1.3.14 跑不了），
+精确到请求级需按 request 去重；`upstream/main` 与 rc.47 一样把前端类型入口改成了 `bun check -b`（本机 bun 已升 1.4.4，实测可跑），
 跟 main 前必须先解决（见本文件 P5 未勾选项与 `docs/VERIFICATION.md` §15/§20）。
 
 ## 1. 产品目标
@@ -178,7 +178,9 @@ git push starbridge product/daily-limit          # 触发 Product Gates，在真
 - [x] 用 `scripts/upstream-sync.sh apply <ref>` 重放 series（tag 或 `upstream/main` 均可），两条路径都实测过（2026-10-25）
 - [x] 向前升级演练：20 个提交重放到超前 rc.46 23 个提交的 `upstream/main`，只有 `model/channel_constraint.go` 冲突两处，其余自动合并，构建与回归全绿（2026-10-24）
 - [x] 解决已知冲突热点：在 `upstream/main` 上完整跑通 25 个提交的重放，人工介入 2 处（`model/channel_constraint.go` 的 switch 取并集、一行注释取我方），升级树构建与回归全绿（2026-10-25，清单见 `docs/UPSTREAM_SYNC.md` §3.3）
-- [ ] 升级前确认上游 typecheck 入口与 CI 的 bun 版本匹配（main 上已变为 `bun check -b`，bun 1.3.14 不支持）
+- [x] 升级前确认上游 typecheck 入口与 CI/本机的 bun 版本匹配 —— 入口已从 `tsgo -b` 变为 `bun check -b`；
+      `cmd_check` 改为按 `web/package.json` 的脚本决定跑什么（不再硬探二进制），本机 bun 升到 1.4.4 后
+      在 rc.47 树实测 `✓ No type errors in 1,407 files across 2 projects`，rc.46 基线 `tsgo -b` 也复跑无回归
 - [x] 跑构建、单测、前端类型检查（`drill` 的 `check` 段现在会在重放树里先装依赖再跑 `tsgo -b`，类型入口缺失判失败而不是告警；`main.go` 的 `go:embed web/dist` 由脚本自动复用或构建）（2026-10-25）
 - [ ] 跑 compose 烟测与逐类型/三库最小部署实测
 - [ ] `export-series` + `verify-series` 导出并校验新基线序列

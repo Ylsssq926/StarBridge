@@ -120,10 +120,11 @@ git diff --check
 > 三组回归全绿。所以 `drill` 报第一个冲突后，按本节改完再 `am --continue`，通常不需要额外介入。
 > 同一对热点在 `v1.0.0-rc.47`（53 个提交）上再次成立：人工介入仍是 2 次、仍在 `model/channel_constraint.go`
 > 的两个位置（`0001` 的 switch 新增 `case` 取并集、`0011` 的函数注释取我方），见 `docs/VERIFICATION.md` §20。
-> 唯一的非功能性阻塞：main 与 rc.47 的 `web/package.json` 都把 typecheck 入口改成了 `bun check -b`，
-> 本地 bun 1.3.14 没有该子命令。`cmd_check` 因此**读 `web/package.json` 的 `typecheck` 脚本来决定跑什么**，
+> 唯一的非功能性阻塞曾经是类型入口：main 与 rc.47 的 `web/package.json` 都把 typecheck 入口改成了 `bun check -b`，
+> 而当时本机 bun 1.3.14 没有该子命令。`cmd_check` 因此**读 `web/package.json` 的 `typecheck` 脚本来决定跑什么**，
 > 并分开报两种失败：`the type gate DID NOT RUN`（本机工具链跑不了这个入口，CI 用 `bun-version: latest` 覆盖它）
 > 与 `typecheck FAILED`（真实类型错误）。只想量冲突面时用 `SKIP_TYPECHECK=1` 明确跳过，别把它当"验过了"。
+> 阻塞本身已消除：本机升到 bun 1.4.4 后 `bun check -b` 在 rc.47 树上实测跑绿（`docs/VERIFICATION.md` §20）。
 > `apply` 现在接受任意 ref（`./scripts/upstream-sync.sh apply upstream/main` → 目录名里的斜杠会被换成连字符）。
 
 - `common/channel_daily_limit.go`：多指标计数（tokens / requests）与 Redis 不可用时的回退
