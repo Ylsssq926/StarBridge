@@ -134,7 +134,11 @@ git diff --check
 - `service/task_polling.go`：任务完成结算的 token 累加
 - `web/src/features/channels/lib/channel-form.ts`：表单 schema/默认值/序列化
 - `web/src/features/channels/lib/channel-configuration.ts`：新字段必须登记进 `extraSettings.fields` 与 configured 判定，否则面板行为回归
-- `web/src/features/channels/components/drawers/channel-mutate-drawer.tsx`：字段渲染
+- `web/src/features/channels/components/drawers/channel-mutate-drawer.tsx`：字段渲染 + 一次「每日预算用量」只读块的挂载（`channelId` 有效时渲染）
+- `web/src/features/channels/api.ts`：`getChannelDailyUsage()` 与 `ChannelDailyUsage` 类型（上游改响应封装时要跟着看）
+- `web/src/features/channels/lib/channel-actions.ts`：`channelsQueryKeys.dailyUsage(id)`；上游若重排 query keys 需保持互不覆盖
+- `web/src/features/channels/components/drawers/channel-daily-usage.tsx`：新增组件，上游不会改，但升级后要确认 `requireServerSuccess` 仍返回整个信封（组件按 `data.data` 取值）
+- `web/src/i18n/locales/*.json`：7 个 locale 各 6 个 key，位置在 `Daily Token Limit` 同层。加 key 只能用文本插入——`bun run i18n:sync` 会把 key 追加到命名空间外、重排文件并重新转义受 Rule 5 保护的 `footer.newapi.*` 署名 key
 - `.gitattributes`、`.github/workflows/product-gates.yml`：行尾规则与门禁清单
 
 ### 3.4 校验

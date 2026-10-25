@@ -373,3 +373,4 @@ SQLite 与 MySQL 的等价实测在 §4 的 `verify-minimal-deployment.mjs`（�
 | 自己发现的实现缺陷（已修） | 组件最初直接读 `requireServerSuccess()` 的返回值，而它返回的是**整个服务端信封**，于是渲染成 `- · Unlimited` 这种"看起来正常其实全空"的界面；改为 `data.data` 并加数值守卫。同时承认先前两条断言是弱测试（该 bug 下也能通过），已改成断言具体数字 |
 | 版本纪律 | 前端内容变化 → `PRODUCT_VERSION` 0.3.0 → **0.4.0**，镜像重打 `new-api-daily-limit:0.4.0` / 别名 `starbridge-gateway:0.4.0`；PoC 头部显示「当前版本：0.4.0」 |
 | 未覆盖 | 7 个 locale 的翻译由我直写，未经母语者校对；「被跳过」计数精确到请求级仍未做；看板页面级汇总（列出所有渠道预算水位）没有做，目前只有单渠道视图 |
+| 升级机制仍然成立 | 加完前端后重跑 `drill v1.0.0-rc.46`：overlap 0 → 重导 **40 个 patch（85 个功能文件，commits == series）** → 纯净 tag 上 `git am -3` 全部 Applying → renormalize → 构建 + common/model/service 回归 → 重放树内装依赖并 **`tsgo -b` 真跑** → `DRILL OK`（退出码 0）。即前端新增文件与三个被改的自有文件在纯净 rc.46 上也能重放并通过类型门 |
