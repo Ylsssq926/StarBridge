@@ -426,5 +426,6 @@ runner 上跑过 workflow"列为未验证项；本轮推上公开仓库后，run
 | **类型门按设计拒绝，没有假装通过** | `cmd_check` 报 `ERROR: dependencies are installed but web/node_modules/.bin/tsgo is missing` → 退出码 1。根因是上游把入口从 `tsgo -b` 换成 `bun check -b`（`web/package.json` 实测 `"typecheck": "bun check -b"`），而本机 `bun 1.3.14` 没有该子命令（实测 `error: Script not found "check"`）。这正是当初把这里写成硬失败而不是"提示后跳过"的理由 |
 | 跟 rc.47 之前必须先做的两件事 | ① 本机 bun 升级（CI 用 `bun-version: latest`，所以只有本机受影响）；② `cmd_check` 的探针不能只认 `tsgo` 二进制——改成"跑 `bun run typecheck`，并区分'入口不存在'与'类型不过'"，否则以后上游每次换入口都会误报成门禁故障 |
 | 上游节奏带来的机制改动 | 跟进单位不该是"每月"而是"每个 release"：建议 `upstream-drill.yml` 的 schedule 从每月 5 日改成每周，并在 `Product Gates` 的定时里带一句当前基线与最新 tag 的差距；真正的落地触发条件应该是"上游发了新 tag" |
+| 重放成果已固化，不会被自动清理吃掉 | 这次解完冲突的 53 个提交留在工作树 `../new-api-v1.0.0-rc.47`，已 `git branch rehearsal-rc47` 并 checkout 成命名分支（本机实测：`git symbolic-ref --short HEAD` = `rehearsal-rc47`、`git rev-list --count v1.0.0-rc.47..HEAD` = 53、脏文件 0）。原因是 `upstream-sync.sh` 的 `is_stale_replay_worktree` 只自动丢弃**游离 HEAD** 的重放树，否则下次 `drill v1.0.0-rc.47` 会先把这份成果静默删掉再重放。副作用要记住：现在再跑 `drill v1.0.0-rc.47` 会被"工作树已存在且在用"挡住，要重做先 `git worktree remove` 或换个 ref 名 |
 | 我没有做的决定 | 没有升级本机 bun（会往 C: 写），没有改 `cmd_check` 的入口判定（机制改动，需你确认），**也没有把 `product/daily-limit` 的基线挪到 rc.47**：落地方式两种且不可兼得——开 `product/rc47` 新分支（加性、不动已发布历史），或改写现有分支基线（要 force-push，而分支保护现在会拒绝它）。成品版本与镜像是否随 rc.47 一起跳，也还没定 |
 
