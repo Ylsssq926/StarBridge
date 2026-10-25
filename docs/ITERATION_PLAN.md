@@ -16,7 +16,8 @@ run `40190561094` 输出 `export-series: OK (commits == series)`、49 patch / 87
 `product/daily-limit`，推的是含上游完整历史的分支（署名/`LICENSE`/`NOTICE` 原样保留），**没有推 tag**。
 分支保护已开（禁 force-push、禁删除、对 admin 生效；仍可直推），细节与回退命令见 §19 与 `docs/OPERATIONS.md`。
 
-每月固定三条命令（都不需要凭据；非 0 退出即代表要人工处理）：
+跟进节奏（**不要按月**）：上游 10-12/10-17/10-21/10-25 各发一个 rc，实测间隔 4~5 天，
+所以触发条件是"上游发了新 tag"，下面三条按周跑即可（都不需要凭据；非 0 退出即代表要人工处理）：
 
 ```bash
 ./scripts/upstream-sync.sh drill upstream/main   # overlap 预估 + 重放 + 构建/回归/类型门
@@ -27,21 +28,22 @@ git push starbridge product/daily-limit          # 触发 Product Gates，在真
 已闭环且有实测背书：日 token 预算、日请求预算（含生图/按次计费）、17 种渠道类型适配、三库最小部署形态、
 协议兼容、备份恢复（`scripts/backup-drill.sh`）、只读可观测接口 `GET /api/channel/daily_usage[/:id]`
 （已进渠道抽屉面板）、JSON 批量导入渠道、GitHub hosted runner 上的三 job 门禁。
-逐条证据在 `docs/VERIFICATION.md` §3/§4/§14/§15/§16/§17/§18/§19。
+逐条证据在 `docs/VERIFICATION.md` §3/§4/§14/§15/§16/§17/§18/§19/§20。
 
-仍未闭环、且不能由我自行闭环的两类：
+仍未闭环、且不能由我自行闭环的三类：
 
 1. 真实 Kiro/Antigravity 账号、真实国内厂商 Key 与真实出图 —— 需要凭据（任务 #9/#11）。
-2. 跟到 `upstream/main` 这一步要人工解一处冲突：runner 上的演练实测
-   `overlap with upstream/main: 19 file(s)`，第 1 个 patch 即停在
-   `model/channel_constraint.go`（`ChannelSatisfiesFilters` 的注释/函数头同一 hunk，
-   上游也改了那段措辞），0/51 应用。演练本身已经跑通并被真实触发过两次
-   （`40191317746` 暴露日志位置缺陷、`40191784310` 如实报告冲突），
-   所以剩下的不是机制问题，是这一处代码归因合并 + main 上类型入口变更（见下）。
+2. **要不要把基线从 rc.46 挪到 rc.47，是产品决定不是技术问题。** 我已在本地把 53 个 patch
+   重放到 rc.47 并跑通后端与三组回归（见 `docs/VERIFICATION.md` §20）：唯一障碍是 1 个文件 2 处
+   冲突（已解，都在 `model/channel_constraint.go`）加上游把前端类型入口换成 `bun check -b`。
+   落地方式二选一：开 `product/rc47` 新分支（加性，不动已发布历史），或改写现有分支基线
+   （需要 force-push，当前分支保护会拒绝——这是有意的）。
+3. 跟进机制本身还差两步：本机 bun 需升级才能跑 rc.47 的类型门；`cmd_check` 的类型门探针
+   只认 `tsgo` 二进制，上游一换入口就会把"没跑成"报成"门禁坏了"，应改成跑脚本并按错误分类。
 
 已知偏差，别当成已修：`reject_selection_attempts_today` 单位是选路尝试（默认配置下 1 个被挡请求计 2 次），
-精确到请求级需按 request 去重；main 的前端类型入口已变成 `bun check -b`，bun 1.3.14 跑不了，
-跟 main 前必须先解决（见本文件 P5 未勾选项与 `docs/VERIFICATION.md` §15）。
+精确到请求级需按 request 去重；`upstream/main` 与 rc.47 一样把前端类型入口改成了 `bun check -b`（本机 bun 1.3.14 跑不了），
+跟 main 前必须先解决（见本文件 P5 未勾选项与 `docs/VERIFICATION.md` §15/§20）。
 
 ## 1. 产品目标
 

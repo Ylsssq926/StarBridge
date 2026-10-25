@@ -410,3 +410,21 @@ runner 上跑过 workflow"列为未验证项；本轮推上公开仓库后，run
 | 这一条把"跟 main 之前要先解决"从文字变成了可执行清单 | 唯一冲突点就是 `model/channel_constraint.go` 里 `ChannelSatisfiesFilters` 的注释与函数头部同一 hunk（上游改了归因注释的措辞，我们的补丁也在改那段注释）。跟 main 时先解这一处，再跑 `make drill REF=upstream/main`；其余 18 个 overlap 文件当前不冲突，属于"要看但不用改" |
 | 这一段不证明的事 | 演练只证明"能如实报告冲突"，不证明冲突可自动解决；`Product Gates` 绿的是基线 tag 上的重放，不是 main 上的重放；self-hosted / ARM runner、发布链（GitHub Release、镜像推送）都未走——且打 tag 会立刻激活上游继承的 `docker-build.yml` / `release.yml` / `electron-build.yml`（三条都在 `on: push: tags` 上），本仓当前无 tag 故它们尚未注册；Dependabot 其余 4 个 PR 还没在新版本 workflow 下重跑 |
 
+## 20. 跟进 v1.0.0-rc.47 的重放实测（2026-10-25，**未落地**）
+
+上游在 2026-10-25 09:04 UTC 发布 `v1.0.0-rc.47`（我们基线 rc.46 是 10-21 发的）。
+`gh release list` 看到的节奏是 rc.44=10-12、rc.45=10-17、rc.46=10-21、rc.47=10-25，
+**间隔 4~5 天**，所以"每月跟进一次"这个假设已被上游事实否掉（`ITERATION_PLAN` §0 已改）。
+
+| 验证 | 结果 |
+|---|---|
+| 冲突范围 | `overlap with v1.0.0-rc.47: 19 file(s)`，但真正停下来的只有 1 个文件、2 处，都在 `model/channel_constraint.go` |
+| 冲突 1（patch 0001） | 上游在 `switch kind` 里新增 `case dto.FilterTaskPluginEndpoint`，正好落在我们要插入 `case dto.FilterDailyTokenLimit` 的位置。两者语义不相干 → 保留双方（上游 case 在前，我们的紧随其后）。Go 的 `switch` 分支顺序不影响正确性，归因顺序由 `dto.filterEvalOrder` 决定，那是另一处 |
+| 冲突 2（patch 0011） | `ChannelSatisfiesFilters` 的文档注释：上游写"first violated filter in filterEvalOrder"，我们改成"first violated filter kind"。我们的改动是必须的——日预算检查现在发生在 `filterEvalOrder` 循环**之前**，上游那句已不准确。合并结果保留我们的语义并补一句说明 |
+| 重放结果 | 两处解完后 `git am --continue` 一路应用到底：**53/53 patch 落在 rc.47 上**，`git rev-list --count v1.0.0-rc.47..HEAD` = 53，无残留 unmerged 文件 |
+| rc.47 树上的门禁 | `go build ./...` 通过；`go test ./common -run Daily` **ok 5.742s**、`./model -run 'Daily\|FilterCandidate\|TaskPlugin'` **ok 6.304s**、`./service -run 'TestSettle_\|TestTaskBilling\|TestLogTaskConsumption\|TestRecalculate'` **ok 6.066s** |
+| **类型门按设计拒绝，没有假装通过** | `cmd_check` 报 `ERROR: dependencies are installed but web/node_modules/.bin/tsgo is missing` → 退出码 1。根因是上游把入口从 `tsgo -b` 换成 `bun check -b`（`web/package.json` 实测 `"typecheck": "bun check -b"`），而本机 `bun 1.3.14` 没有该子命令（实测 `error: Script not found "check"`）。这正是当初把这里写成硬失败而不是"提示后跳过"的理由 |
+| 跟 rc.47 之前必须先做的两件事 | ① 本机 bun 升级（CI 用 `bun-version: latest`，所以只有本机受影响）；② `cmd_check` 的探针不能只认 `tsgo` 二进制——改成"跑 `bun run typecheck`，并区分'入口不存在'与'类型不过'"，否则以后上游每次换入口都会误报成门禁故障 |
+| 上游节奏带来的机制改动 | 跟进单位不该是"每月"而是"每个 release"：建议 `upstream-drill.yml` 的 schedule 从每月 5 日改成每周，并在 `Product Gates` 的定时里带一句当前基线与最新 tag 的差距；真正的落地触发条件应该是"上游发了新 tag" |
+| 我没有做的决定 | 没有升级本机 bun（会往 C: 写），没有改 `cmd_check` 的入口判定（机制改动，需你确认），**也没有把 `product/daily-limit` 的基线挪到 rc.47**：落地方式两种且不可兼得——开 `product/rc47` 新分支（加性、不动已发布历史），或改写现有分支基线（要 force-push，而分支保护现在会拒绝它）。成品版本与镜像是否随 rc.47 一起跳，也还没定 |
+

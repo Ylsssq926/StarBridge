@@ -226,7 +226,8 @@ series 覆盖的文件集合（fail-closed：任何非产品层、非构建产�
 - `ChannelSpecialBases` 是否新增 Coding Plan
 - 上游 `ChannelFilterKind` / 选路 / 结算改动
 
-每月：
+每周（不是每月——上游 rc.44/45/46/47 分别发在 10-12/10-17/10-21/10-25，实测间隔 4~5 天，
+按月跑会把一个月的上游改动积累成一次大冲突，见 `docs/VERIFICATION.md` §20）：
 
 - `./scripts/upstream-sync.sh drill upstream/main`：上游可跟性演练（冲突面 + 构建 + 回归 + 类型门），非 0 退出即代表"这一版要人工处理"，输出里直接给出冲突文件清单
 - Sub2API / CLIProxyAPI / AIClient2API release
@@ -262,13 +263,14 @@ CI 与 `drill` 的分工：CI 只在**基线 tag** 上重放（那一路必然�
 `drill <更新的上游 ref>` 是本机才做的事——它回答"下一版上游能不能跟、要改哪几处"，CI 不跑那个 ref，
 也不该跑（失败是预期结果，会把门禁刷红）。
 
-另有一个 `.github/workflows/upstream-drill.yml`：每月 5 日 03:00 UTC 把 series 重放到最新
+另有一个 `.github/workflows/upstream-drill.yml`：每周日 03:00 UTC 把 series 重放到最新
 `upstream/main` 并跑门禁，`continue-on-error` + 把 overlap / `DRILL OK|FAILED` / 冲突文件写进
 step summary 与日志产物。它是**信号不是红绿灯**（失败也整绿，⚠ 在步骤上）。
-两个前提：`schedule` 只在仓库**默认分支**生效（product 分支还不是默认分支时用 `workflow_dispatch` 手动触发，可传 ref）；
-演练结论仍要有人看，别把它当成"跑过了就没事"。
+两个实操前提：`schedule` 只在仓库**默认分支**生效（`product/daily-limit` 已是默认分支）；
+而且 GitHub **只有在你推一个改动该文件的提交之后**才把它列进 `GET /actions/workflows`，
+在那之前 `workflow_dispatch` 都会 404。演练结论仍要有人看，别把它当成"跑过了就没事"。
 
-一条只有 CI 演练才暴露的规则：`main.go` 用 `go:embed web/dist`，**重放出的工作树若没有前端产物，`go build ./...` 会直接失败**。`upstream-sync.sh check` 会自动复用或构建 `web/dist`，CI 里由 `frontend` job 的产物补上，手工在新工作树里跑 `go build` 也要先准备它。
+一条只有 CI 演练才暴露的规则：`main.go` 用 `go:embed web/dist`，**重放出的工作树若没有前端产物，`go build ./...` 会直接失败**。`upstream-sync.sh check` 会自动复用或构建 `web/dist`；CI 的 `sync-integrity` job 与上游 `ci.yml` 一样自建一个占位 `web/dist/index.html`（不再跨 job 传 artifact——第一版传的是一个根本没构建过的空目录，runner 上直接 `Artifact not found`，见 `docs/VERIFICATION.md` §19）；手工在新工作树里跑 `go build` 也要先准备它。
 
 端到端门禁（需要 compose 栈 + `node scripts/mock-upstream.cjs`，发布前手工执行）：
 

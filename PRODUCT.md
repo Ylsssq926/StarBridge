@@ -116,7 +116,7 @@ docker compose -f docker-compose.poc.yml up -d
 
 1. **核心不合并旁路代码**：账号池/OAuth 刷新放在 AIClient2API / CLIProxyAPI / Sub2API，通过 58/59/60 渠道接入。
 2. **私有补丁保持小**：两个日预算特性的实现改动 **25 个文件 `+587/-38`**；含测试与前端 locale 共 36 个文件 `+929/-39`（`git diff --shortstat v1.0.0-rc.46..HEAD -- common constant dto i18n model relaykit service web/src`，排除处再加 `':!*_test.go' ':!*__tests__*' ':!web/src/i18n'`）。改的是过滤器 + 结算/提交钩子，不重写选路核心。
-3. **跟上游优先**：每月一条 `./scripts/upstream-sync.sh drill <上游 ref>` 完成"overlap 预估 → 重放 `patches/series` → 构建 + 回归 + 类型门"，非 0 退出即说明这一版要人工处理，输出里直接给冲突文件与后续命令。
+3. **跟上游优先**：一条 `./scripts/upstream-sync.sh drill <上游 ref>` 完成"overlap 预估 → 重放 `patches/series` → 构建 + 回归 + 类型门"，非 0 退出即说明这一版要人工处理，输出里直接给冲突文件与后续命令。节奏按上游 release 而不是按月：实测 rc.44/45/46/47 间隔 4~5 天（`docs/VERIFICATION.md` §20）。
 4. **国内模型优先**：DeepSeek、Kimi、智谱、通义、MiniMax、火山、百度、腾讯等使用 new-api 原生渠道。
 5. **生图走官方扩展点**：优先用 new-api 内置 Task Plugin（阿里 Wan/Qwen-Image、豆包 Seedream），不修改核心。
 
@@ -138,7 +138,7 @@ docker compose -f docker-compose.poc.yml up -d
 - 三条旁路容器验证
 - 内置阿里图片插件 mock 验证
 - compose 起停与容器网络验证
-- patch 跨 rc.46 / main 重放验证；每月跟进收敛为一条 `drill` 命令
+- patch 跨 rc.46 / rc.47 / main 重放验证；跟进收敛为一条 `drill` 命令，节奏按上游 release（实测 4~5 天一个 rc）
 - 备份恢复演练（Postgres：转储 → 旁路库恢复 → 逐表行数比对 → 用恢复库起服务探活）
 - 跨平台门禁（Linux 容器内重跑工具层与后端回归）
 
