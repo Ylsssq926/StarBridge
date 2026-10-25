@@ -1,5 +1,34 @@
 # 迭代规划（v0.1.0 → v1.0.0）
 
+## 0. 当前状态与恢复点（2026-10-25，供下一次接手直接照做）
+
+基线 `v1.0.0-rc.46`，分支 `product/daily-limit`，38 个私有提交 == `patches/series` 38 个 patch
+（`./scripts/upstream-sync.sh export-series v1.0.0-rc.46` 校验 `commits == series`）。成品版本 `0.3.0`，
+PoC 栈 `./scripts/product.sh up` 后 healthy。
+
+每月固定两条命令（都不需要凭据；非 0 退出即代表要人工处理）：
+
+```bash
+./scripts/upstream-sync.sh drill upstream/main   # overlap 预估 + 重放 + 构建/回归/类型门
+./scripts/linux-gate.sh                          # Linux 容器里重跑工具层与后端回归
+```
+
+已闭环且有实测背书：日 token 预算、日请求预算（含生图/按次计费）、17 种渠道类型适配、三库最小部署形态、
+协议兼容、备份恢复（`scripts/backup-drill.sh`）、只读可观测接口 `GET /api/channel/daily_usage[/:id]`。
+逐条证据在 `docs/VERIFICATION.md` §3/§4/§14/§15/§16。
+
+仍未闭环、且不能由我自行闭环的三类：
+
+1. 真实 Kiro/Antigravity 账号、真实国内厂商 Key 与真实出图 —— 需要凭据（任务 #9/#11）。
+2. StarBridge 独立仓库建立与推送 —— 需要用户批准；本地未 push。推送后第一件事是让
+   `.github/workflows/product-gates.yml` 与 `upstream-drill.yml` 在真实 runner 上跑一次，
+   关掉"CI 只有本地等价命令绿"这一未验证项。
+3. 把 `daily_usage` 接进渠道看板 —— 会扩大前端补丁面，需用户权衡。
+
+已知偏差，别当成已修：`reject_selection_attempts_today` 单位是选路尝试（默认配置下 1 个被挡请求计 2 次），
+精确到请求级需按 request 去重；main 的前端类型入口已变成 `bun check -b`，bun 1.3.14 跑不了，
+跟 main 前必须先解决（见本文件 P5 未勾选项与 `docs/VERIFICATION.md` §15）。
+
 ## 1. 产品目标
 
 做一个**以国内模型为主、能接入 Kiro/Antigravity 等账号类上游、支持生图、且能长期跟上游更新**的 AI 网关成品。
