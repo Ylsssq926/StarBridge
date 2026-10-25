@@ -209,3 +209,16 @@ docker start new-api-poc
 手工确认一次当天用量即可。
 
 改完代码要发布：`./scripts/build-image.sh` 会重新生成 `bin/new-api-linux` 并打 `new-api-daily-limit:local` + `new-api-daily-limit:$(cat PRODUCT_VERSION)` 两个 tag。
+
+## 9. 公开前自检（每次准备推到公开仓库之前跑一遍）
+
+```bash
+git log -p <上游基线>..HEAD | grep -inE "sk-[A-Za-z0-9]{16,}|ghp_|gho_|-----BEGIN|AKIA[0-9A-Z]{16}" | head
+git grep -ln "Jonathan\|C:/Users" -- .            # 本地路径/用户名
+git grep -l "^\.env$\|backups/" ; git ls-files | grep -iE "\.env$|\.pem$|id_rsa"   # 密钥与备份产物是否被跟踪
+git remote -v | grep -iE "ghp_|gho_|:[^/]*@"      # remote URL 里的 token
+```
+
+2026-10-25 实测结果：我们 45 个提交的 diff 里没有高熵凭据；`.env`、`backups/`、`patches/series/` 均未被跟踪；无 `.pem`/私钥文件；remote URL 不含 token；跟踪文件里没有本地用户名或绝对路径。唯一命中项 `relay/channel/tencent/dispatch_test.go` 是上游自带文件（测试用假值，本来就公开在上游）。
+
+需要知道但不算泄漏的两类值：`rootpass123` 与 `newapi` 是 **PoC 本地栈的默认口令**（出现在 5 个 harness 脚本与本文档里，可用 `NEW_API_ADMIN_USER/NEW_API_ADMIN_PASS` 覆盖）；真实部署的管理员账号是首次访问 `/setup` 时由你自己设的，成品 `.env.product.example` 里三个密钥字段都是 `change-me` 占位。推公开仓库前请确认：不要把线上 `.env` 复制进仓库，也不要复用 PoC 默认口令。
