@@ -32,8 +32,12 @@ git push starbridge product/daily-limit          # 触发 Product Gates，在真
 仍未闭环、且不能由我自行闭环的两类：
 
 1. 真实 Kiro/Antigravity 账号、真实国内厂商 Key 与真实出图 —— 需要凭据（任务 #9/#11）。
-2. `Upstream Drill` 这条 workflow 已在远端默认分支的树里，但 GitHub 还没注册它，
-   所以**月度定时演练还没有一次真实触发**；下一次改动它并推送后要用 `gh workflow run` 实跑一次。
+2. 跟到 `upstream/main` 这一步要人工解一处冲突：runner 上的演练实测
+   `overlap with upstream/main: 19 file(s)`，第 1 个 patch 即停在
+   `model/channel_constraint.go`（`ChannelSatisfiesFilters` 的注释/函数头同一 hunk，
+   上游也改了那段措辞），0/51 应用。演练本身已经跑通并被真实触发过两次
+   （`40191317746` 暴露日志位置缺陷、`40191784310` 如实报告冲突），
+   所以剩下的不是机制问题，是这一处代码归因合并 + main 上类型入口变更（见下）。
 
 已知偏差，别当成已修：`reject_selection_attempts_today` 单位是选路尝试（默认配置下 1 个被挡请求计 2 次），
 精确到请求级需按 request 去重；main 的前端类型入口已变成 `bun check -b`，bun 1.3.14 跑不了，
