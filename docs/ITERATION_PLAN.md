@@ -140,7 +140,8 @@ PoC 栈 `./scripts/product.sh up` 后 healthy。
 - [ ] Postgres + Redis 生产化（备份、连接池、监控）
 - [ ] 日志、错误告警、渠道健康看板
 - [x] 日限额指标（当前用量/限额/拒绝次数）：`GET /api/channel/daily_usage[/:id]` 只读接口 + `rejects` 计数器，端到端 `scripts/verify-daily-observability.mjs` 通过（2026-10-25）。计数单位是"选路尝试"（实测默认配置下 1 个被挡请求计 2 次，根因见 `docs/VERIFICATION.md` §15），接口一并返回 `retry_times`
-- [ ] 渠道健康看板与告警（把上面的接口接到面板）
+- [x] 渠道健康看板与告警（面板侧）：渠道抽屉「其他设置」页签已显示每日预算用量（今日 Token、今日请求数、被跳过的选路次数 + 刷新），浏览器实测数字随真实流量更新，见 `docs/VERIFICATION.md` §17（2026-10-25）。剩下的"告警"仍属未做
+- [ ] 日预算「被拦请求数」精确到请求级：2026-10-25 试过在 `dailyLimitExceededError` 处计数，端到端实测恒为 0（组级 429 的 `channel` 是 nil），**已回退**，过程见 `docs/VERIFICATION.md` §17。可行的做法是把 request id 带进过滤器层做请求作用域去重，或在 service 层收集本轮被预算挡掉的渠道后统一计一次；比看上去贵，别再用"在 429 构造函数里 +1"糊过去
 - [x] 备份与恢复演练：`scripts/backup-drill.sh`（Postgres）—— 转储→旁路库恢复→38 张表逐表行数比对→用恢复库真起容器探活，全绿；失败路径实测不会误删同名库。SQLite/MySQL 的等价实测仍走 `verify-minimal-deployment.mjs`（2026-10-25）
 - [ ] 灰度升级流程（先旁路，再 new-api）
 - [ ] 安全：管理员权限、OAuth 凭据加密、代理访问控制
