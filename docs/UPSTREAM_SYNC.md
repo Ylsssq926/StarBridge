@@ -118,8 +118,12 @@ git diff --check
 > 的同一个文件。把两处热点依次解决后跑完整重放（`am --continue`）：**25 个提交全部落地，人工介入只有 2 次**
 > —— `0001` 是 switch 里两个 `case` 取并集，`0011` 是一行函数注释取我方；升级树 `go build` + relaykit +
 > 三组回归全绿。所以 `drill` 报第一个冲突后，按本节改完再 `am --continue`，通常不需要额外介入。
-> 唯一的非功能性阻塞：main 的 `web/package.json` 把 typecheck 改成了 `bun check -b`，本地 bun 1.3.14 跑不了，
-> 这类情况用 `SKIP_TYPECHECK=1` 明确跳过，并在升级时同步换 bun 版本或改命令。
+> 同一对热点在 `v1.0.0-rc.47`（53 个提交）上再次成立：人工介入仍是 2 次、仍在 `model/channel_constraint.go`
+> 的两个位置（`0001` 的 switch 新增 `case` 取并集、`0011` 的函数注释取我方），见 `docs/VERIFICATION.md` §20。
+> 唯一的非功能性阻塞：main 与 rc.47 的 `web/package.json` 都把 typecheck 入口改成了 `bun check -b`，
+> 本地 bun 1.3.14 没有该子命令。`cmd_check` 因此**读 `web/package.json` 的 `typecheck` 脚本来决定跑什么**，
+> 并分开报两种失败：`the type gate DID NOT RUN`（本机工具链跑不了这个入口，CI 用 `bun-version: latest` 覆盖它）
+> 与 `typecheck FAILED`（真实类型错误）。只想量冲突面时用 `SKIP_TYPECHECK=1` 明确跳过，别把它当"验过了"。
 > `apply` 现在接受任意 ref（`./scripts/upstream-sync.sh apply upstream/main` → 目录名里的斜杠会被换成连字符）。
 
 - `common/channel_daily_limit.go`：多指标计数（tokens / requests）与 Redis 不可用时的回退
@@ -162,7 +166,7 @@ git diff --check
 - relaykit 独立构建
 - 日限额单测
 - 任务计费回归
-- 前端 `bun run typecheck`：worktree 里没有 `web/node_modules` 时先 `bun install --frozen-lockfile` 再跑（实测 1187 包 / 178s）；依赖齐了却找不到类型入口 → **判失败**并提示读 `web/package.json`，不再"缺失即跳过"
+- 前端 `bun run typecheck`：worktree 里没有 `web/node_modules` 时先 `bun install --frozen-lockfile` 再跑（实测 1187 包 / 178s）。跑什么由 `web/package.json` 里的 `typecheck` 脚本决定（rc.46 是 `tsgo -b`，rc.47/main 是 `bun check -b`），**不认具体二进制**；失败分两类报：入口在本机不可用 → `the type gate DID NOT RUN`，真实类型错误 → `typecheck FAILED`。两类都是非 0 退出，绝不"缺失即跳过"
 - 可用 `SKIP_TYPECHECK=1` 强制跳过（只量冲突面时用），跳过时会打印 `typecheck: skipped`
 
 `check-full` 包含：

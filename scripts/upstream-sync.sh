@@ -319,16 +319,33 @@ cmd_check() {
       echo "==> typecheck: installing web dependencies (frozen lockfile)"
       (cd web && bun install --frozen-lockfile)
     fi
-    if [ -e web/node_modules/.bin/tsgo ]; then
-      (cd web && bun run typecheck)
+    # The contract is the `typecheck` script itself, not any particular binary:
+    # upstream renamed its entry point (rc.46 `tsgo -b` -> rc.47/main `bun check -b`),
+    # and probing for one binary reports "gate broken" when the real message is
+    # "this machine's toolchain cannot run that entry".
+    entry=$(node -e 'process.stdout.write(require("./web/package.json").scripts.typecheck || "")' 2>/dev/null)
+    if [ -z "$entry" ]; then
+      echo "ERROR: web/package.json has no typecheck script on this ref." >&2
+      echo "       Read web/package.json here and update cmd_check. Deliberately skipping it:" >&2
+      echo "       SKIP_TYPECHECK=1 $0 check $dir" >&2
+      exit 1
+    fi
+    echo "==> typecheck: bun run typecheck  (entry: $entry)"
+    if out=$( (cd web && bun run typecheck) 2>&1 ); then
       echo "==> typecheck: ran"
     else
-      # Hard failure, not a note: "the type gate did not run" must not be
-      # mistaken for "the type gate passed".
-      echo "ERROR: dependencies are installed but web/node_modules/.bin/tsgo is missing." >&2
-      echo "       Upstream probably changed the typecheck entry point; read web/package.json" >&2
-      echo "       on this ref and update cmd_check. Deliberately skipping it:" >&2
-      echo "       SKIP_TYPECHECK=1 $0 check $dir" >&2
+      # Fail closed either way; only the diagnosis differs, because the operator
+      # needs to know whether the types are wrong or the gate never ran.
+      printf '%s\n' "$out"
+      if grep -q "Script not found" <<<"$out"; then
+        echo "ERROR: the type gate DID NOT RUN. bun $(bun --version 2>/dev/null) here does not" >&2
+        echo "       provide the '$entry' entry point upstream switched to." >&2
+        echo "       Product Gates CI runs it on `bun-version: latest`, so this local run does" >&2
+        echo "       NOT cover it. Upgrade bun, or skip it on purpose:" >&2
+        echo "       SKIP_TYPECHECK=1 $0 check $dir" >&2
+      else
+        echo "ERROR: typecheck FAILED on real type errors (output above)." >&2
+      fi
       exit 1
     fi
   )
