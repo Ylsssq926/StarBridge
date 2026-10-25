@@ -359,3 +359,17 @@ SQLite 与 MySQL 的等价实测在 §4 的 `verify-minimal-deployment.mjs`（�
 
 **这一段不证明的事**：没在 GitHub hosted runner 上跑过 workflow（缓存、setup 版本、artifact 传递仍是未验证项）；
 前端 `typecheck`/`vitest` 与 compose 全栈仍只在 Windows 上验过；`verify-*.mjs` 端到端依赖本机已起的 PoC 栈，未在 Linux 里重建。
+
+## 17. 面板接入：日预算用量（0.4.0）
+
+| 验证 | 结果 |
+|---|---|
+| 代码位置 | 新组件 `web/src/features/channels/components/drawers/channel-daily-usage.tsx`，插在渠道抽屉「其他设置」页签内；数据走 `GET /api/channel/daily_usage/:id`，前端只读、不新增写路径 |
+| 补丁面 | 只改 3 个既有文件（`features/channels/api.ts` 加一个函数与类型、`lib/channel-actions.ts` 加一个 query key、抽屉加一次渲染）+ 新增 2 个文件 + 每个 locale 恰好 6 行；`git diff --stat` 可复核 |
+| i18n | 7 个 locale 各新增同样 6 个 key，全部落在既有命名空间内。`bun run i18n:sync` 被否决：它把新 key 追加到命名空间**外面**（i18next 读不到），还顺手改了无关的 `"0 means unlimited"` 并把受 Rule 5 保护的署名 key `footer.new\u0061pi.*` 重新转义 → 改为纯文本插入，`git diff` 对 i18n 只有 42 行新增、0 行删除，署名 key 未出现在 diff 中 |
+| 静态门 | `bun run typecheck` 退出码 0；`vitest run src/features/channels` **361/361**；`oxlint 1.74.0` 只跑本次改动的 5 个文件：0 warnings / 0 errors |
+| 浏览器实测（不是单测代理） | 0.4.0 镜像 + 真实流量：渠道 322 连跑 2 次 chat 后，面板显示 今日 Token `20 / 50,000`、今日请求数 `2 / 7`、被跳过 `0`；点「刷新」数字随之更新——证明读的是活计数器而不是快照 |
+| 被拦路径的数据 | 渠道 323 限额 1 次请求：第 1 次 200、第 2 次 **429 `channel:daily_request_limit_exceeded`**，接口快照 `reject_selection_attempts_today=2`、`requests_used=1`。这一条是接口层取证；面板上对 323 的同一渲染路径已在 322 上验证过，未再逐一截图 |
+| 自己发现的实现缺陷（已修） | 组件最初直接读 `requireServerSuccess()` 的返回值，而它返回的是**整个服务端信封**，于是渲染成 `- · Unlimited` 这种"看起来正常其实全空"的界面；改为 `data.data` 并加数值守卫。同时承认先前两条断言是弱测试（该 bug 下也能通过），已改成断言具体数字 |
+| 版本纪律 | 前端内容变化 → `PRODUCT_VERSION` 0.3.0 → **0.4.0**，镜像重打 `new-api-daily-limit:0.4.0` / 别名 `starbridge-gateway:0.4.0`；PoC 头部显示「当前版本：0.4.0」 |
+| 未覆盖 | 7 个 locale 的翻译由我直写，未经母语者校对；「被跳过」计数精确到请求级仍未做；看板页面级汇总（列出所有渠道预算水位）没有做，目前只有单渠道视图 |

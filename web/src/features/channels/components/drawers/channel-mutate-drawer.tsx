@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
+import { ChannelDailyUsage } from './channel-daily-usage'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowRight,
@@ -4840,6 +4841,11 @@ export function ChannelMutateDrawer({
                 {httpShardsFields}
                 {tlsInsecureSkipVerifyFields}
               </fieldset>
+              {isEditing && channelId != null && channelId > 0 && (
+                <div className='pt-1'>
+                  <ChannelDailyUsage channelId={channelId} />
+                </div>
+              )}
             </div>
             {upstreamModelDetectionFields}
             {notesFields}

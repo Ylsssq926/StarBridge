@@ -33,7 +33,7 @@
 | `/users` `/redemption-codes` `/subscriptions` `/wallet` | 用户、兑换码、订阅、额度/支付 | 运营 |
 | `/keys` 之外还有 `/profile` | 个人资料、密码、2FA、Passkey、OAuth 绑定 | 账号自助 |
 | `/chat`、`/chat2link` | 内置会话与第三方客户端跳转配置 | 给使用者直接试 |
-| `/system-info` | 版本、数据库/缓存状态、性能 | 确认补丁版本（成品 0.3.0 显示 `0.3.0`） |
+| `/system-info` | 版本、数据库/缓存状态、性能 | 确认补丁版本（成品 0.4.0 显示 `0.4.0`） |
 | `/pricing`、`/pricing/<modelId>`、`/rankings`（公开） | 对外价格页与排行 | 客户端选型用 |
 
 > 表格来自 `web/src/routes/` 的实际路由与各界面 `section-registry.tsx` 的分节 id，不是照抄上游 README；系统设置页大多带 `$section` 子路径，例如实测见过的 `/system-settings/request-policies/routing`。
@@ -124,6 +124,11 @@ curl http://<host>:3800/v1/chat/completions \
 | 生图请求被上游拒 | 内置插件只覆盖阿里 `17`、豆包 `45/54` | 其它厂商用 `1`/`58` 渠道或旁路 |
 
 ## 8. 验证与运维护栏
+
+渠道用量可见性：`/channels` → 某渠道「编辑」→「其他设置」页签，底部「每日预算用量」块显示
+今日 Token（已用/限额）、今日请求数（已用/限额）、今日被跳过的选路次数，带「刷新」按钮；
+两个限额都没配的渠道不显示这一块。数据来自执行层正在读的同一组计数器（接口
+`GET /api/channel/daily_usage/:id`），不是另一套账。
 
 备份提示：SQLite 走 WAL 模式，热备份必须把 `one-api.db`、`one-api.db-wal`、`one-api.db-shm` 一起取走，或先执行 `PRAGMA wal_checkpoint(TRUNCATE)`；只拷主库文件会得到一个几乎为空的库（实测见过 4KB 主库 + 3MB WAL）。
 

@@ -161,6 +161,40 @@ export async function getChannel(id: number): Promise<GetChannelResponse> {
 }
 
 /**
+ * Today's per-day budget state for one channel, as reported by the relay layer.
+ * `reject_selection_attempts_today` counts channel-selection attempts that found
+ * the channel over budget, so one blocked request may add more than one.
+ */
+export interface ChannelDailyUsage {
+  channel_id: number
+  name: string
+  status: number
+  daily_token_limit: number
+  tokens_used: number
+  daily_request_limit: number
+  requests_used: number
+  reject_selection_attempts_today: number
+  retry_times: number
+}
+
+export type GetChannelDailyUsageResponse = {
+  success: boolean
+  message?: string
+  data: ChannelDailyUsage
+}
+
+/**
+ * Get today's per-day budget state for a channel (limits, usage, skipped
+ * selection attempts). Read-only, admin/channel-read permission.
+ */
+export async function getChannelDailyUsage(
+  id: number
+): Promise<GetChannelDailyUsageResponse> {
+  const res = await api.get(`/api/channel/daily_usage/${id}`)
+  return res.data
+}
+
+/**
  * Get channel operations summary for administrators
  */
 export async function getChannelOps(

@@ -1,4 +1,4 @@
-# 星桥 StarBridge · New API 国内模型网关（成品说明 v0.3.0）
+# 星桥 StarBridge · New API 国内模型网关（成品说明 v0.4.0）
 
 ## 名称与来源
 
@@ -47,7 +47,7 @@
 | `patches/series/` | **主机制**：由分支提交生成的 patch series（`git am -3` 重放） |
 | `patches/legacy/` | pre-commit 基线的手工 file patch，仅供 `USE_SERIES=0` 回退与历史对照 |
 
-已构建镜像：`new-api-daily-limit:local` / `:0.3.0`，别名 `starbridge-gateway:local` / `:0.3.0`（约 312MB，含 `LICENSE`、`NOTICE`、`THIRD-PARTY-LICENSES.md`）。版本 tag 不可变：内容变化必须升 `PRODUCT_VERSION`（0.3.0 新增日预算只读接口）。
+已构建镜像：`new-api-daily-limit:local` / `:0.4.0`，别名 `starbridge-gateway:local` / `:0.4.0`（约 312MB，含 `LICENSE`、`NOTICE`、`THIRD-PARTY-LICENSES.md`）。版本 tag 不可变：内容变化必须升 `PRODUCT_VERSION`（0.3.0 新增日预算只读接口）。
 
 ## 快速启动
 
@@ -130,7 +130,7 @@ docker compose -f docker-compose.poc.yml up -d
 
 ## 迭代规划
 
-详见 [docs/ITERATION_PLAN.md](docs/ITERATION_PLAN.md)。当前 v0.3.0 已完成：
+详见 [docs/ITERATION_PLAN.md](docs/ITERATION_PLAN.md)。当前 v0.4.0 已完成：
 
 - 上游基线重建
 - 日限额后端 + 前端 + 测试
