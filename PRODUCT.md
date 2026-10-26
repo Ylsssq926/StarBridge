@@ -1,4 +1,4 @@
-# 星桥 StarBridge · New API 国内模型网关（成品说明 v0.5.0）
+# 星桥 StarBridge · New API 国内模型网关（成品说明 v0.6.0 · 上游基线 v1.0.0-rc.47）
 
 ## 名称与来源
 
@@ -115,7 +115,7 @@ docker compose -f docker-compose.poc.yml up -d
 ## 设计原则
 
 1. **核心不合并旁路代码**：账号池/OAuth 刷新放在 AIClient2API / CLIProxyAPI / Sub2API，通过 58/59/60 渠道接入。
-2. **私有补丁保持小**：两个日预算特性的实现改动 **25 个文件 `+587/-38`**；含测试与前端 locale 共 36 个文件 `+929/-39`（`git diff --shortstat v1.0.0-rc.46..HEAD -- common constant dto i18n model relaykit service web/src`，排除处再加 `':!*_test.go' ':!*__tests__*' ':!web/src/i18n'`）。改的是过滤器 + 结算/提交钩子，不重写选路核心。
+2. **私有补丁保持小**：在当前基线上按同一条命令重测 —— 两个日预算特性的实现改动 **30 个文件 `+889/-38`**，含测试与前端 locale 共 **43 个文件 `+1430/-39`**（`git diff --shortstat "$(./scripts/upstream-sync.sh base)"..HEAD -- common constant dto i18n model relaykit service controller router web/src`，实现面那条再加排除 `':!*_test.go' ':!*__tests__*' ':!web/src/i18n'`）。这里修正过一次口径：旧命令的目录清单漏了 `controller` 与 `router`，等于把只读接口的实现排除在"补丁有多小"之外，所以 0.5.0 时代写的 25 个文件 `+587/-38` 是**低报**。改的是过滤器 + 结算/提交钩子，不重写选路核心。
 3. **跟上游优先**：一条 `./scripts/upstream-sync.sh drill <上游 ref>` 完成"overlap 预估 → 重放 `patches/series` → 构建 + 回归 + 类型门"，非 0 退出即说明这一版要人工处理，输出里直接给冲突文件与后续命令。节奏按上游 release 而不是按月：实测 rc.44/45/46/47 间隔 4~5 天（`docs/VERIFICATION.md` §20）。
 4. **国内模型优先**：DeepSeek、Kimi、智谱、通义、MiniMax、火山、百度、腾讯等使用 new-api 原生渠道。
 5. **生图走官方扩展点**：优先用 new-api 内置 Task Plugin（阿里 Wan/Qwen-Image、豆包 Seedream），不修改核心。
@@ -130,7 +130,7 @@ docker compose -f docker-compose.poc.yml up -d
 
 ## 迭代规划
 
-详见 [docs/ITERATION_PLAN.md](docs/ITERATION_PLAN.md)。当前 v0.5.0 已完成：
+详见 [docs/ITERATION_PLAN.md](docs/ITERATION_PLAN.md)。当前 v0.6.0（上游基线 `v1.0.0-rc.47`）已完成：
 
 - 上游基线重建
 - 日限额后端 + 前端 + 测试（Token 预算与请求数预算两个维度，含生图/按次计费任务）
@@ -149,7 +149,7 @@ docker compose -f docker-compose.poc.yml up -d
 ```bash
 ./scripts/upstream-sync.sh status                      # 落后多少 + overlap 预估（哪些文件双方都改了）
 ./scripts/upstream-sync.sh drill upstream/main         # 一键演练：导出 series → 重放 → 构建/回归/类型门
-./scripts/upstream-sync.sh export-series v1.0.0-rc.46   # 分支提交 → patches/series + fail-closed 校验
+./scripts/upstream-sync.sh export-series          # 分支提交 → patches/series + fail-closed 校验（基线由脚本自取）
 ./scripts/upstream-sync.sh apply v1.0.0-rc.47           # 新 tag 上 git am -3 重放 series
 ./scripts/upstream-sync.sh check ../new-api-v1.0.0-rc.47
 # 发布前完整校验（worktree 内构建前端 + typecheck + 后端回归）
@@ -162,7 +162,7 @@ docker compose -f docker-compose.poc.yml up -d
 
 可复现的验证结论（命令见 `docs/UPSTREAM_SYNC.md` §6）：
 
-- 新鲜 worktree 从上游 tag `v1.0.0-rc.46` 重放补丁 → 前端构建 + 类型检查 + 后端回归全通过。
+- 新鲜 worktree 从当前基线（`upstream-sync.sh base`）重放补丁 → 前端构建 + 类型检查 + 后端回归全通过；在 `v1.0.0-rc.47` 上的实测见 `docs/VERIFICATION.md` §21。
 - 日限额 14 项边界检查在三种运行形态下均 14/14：内存缓存选路、数据库选路、未启用 Redis（进程内回退）。
 - 协议/接线兼容 7 项全通过：OpenAI、Claude、Gemini 三种入站格式 + 生图 + 错误语义（503 与 429 区分）+ 无效令牌 + 旁路可达。
 - 逐上游类型：17/17 类型面板适配、15/15 可路由类型到顶 429（含 58/59/60 旁路类型与 62/63 推理框架）。

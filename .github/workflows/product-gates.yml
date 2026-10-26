@@ -7,7 +7,9 @@ on:
   pull_request:
   push:
     branches:
-      - product/daily-limit
+      # 用通配而不是写死分支名：换上游基线时只会新开一条 product/<tag> 分支，
+      # 门禁必须自动跟着新分支走，否则最坏的情况是"默认分支上的推送不再跑门"而没人发现。
+      - 'product/*'
   workflow_dispatch:
   schedule:
     # 每周一 03:00 UTC：即使没人提 PR，也检查与上游的偏移是否可重放。

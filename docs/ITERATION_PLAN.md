@@ -1,20 +1,25 @@
 # 迭代规划（v0.1.0 → v1.0.0）
 
-## 0. 当前状态与恢复点（2026-10-25，供下一次接手直接照做）
+## 0. 当前状态与恢复点（2026-10-26，供下一次接手直接照做）
 
-基线 `v1.0.0-rc.46`，分支 `product/daily-limit`，成品版本 `0.5.0`。
-提交数与 patch 数不在本文固化（写成数字一定会腐烂），每次以命令为准：
+**你现在看到的这条分支就是成品主线**：基线 `v1.0.0-rc.47`，成品版本 `0.6.0`。
+上一代主线 `product/daily-limit`（基线 rc.46、版本 0.5.0）已冻结，只作为 §19/§20 证据的落点，
+不要再往它提交 —— 否则会立刻出现"两条主线各自漂"的最坏局面。
+
+提交数、patch 数、以及"当前基线是谁"都不在本文固化（写成数字一定腐烂），用命令自取：
 
 ```bash
-./scripts/upstream-sync.sh export-series v1.0.0-rc.46   # 重新生成 patches/series 并校验 commits == series
+./scripts/upstream-sync.sh base            # 当前基线（全项目唯一来源）
+./scripts/upstream-sync.sh export-series   # 重新生成 patches/series 并校验 commits == series
 ```
 
 本地 `patches/series/` 是生成物且 gitignore；CI 的 `sync-integrity` 跑的是同一条命令，
-run `40190561094` 输出 `export-series: OK (commits == series)`、49 patch / 87 功能文件。
+换基线后实测输出 `60 patches == 60 commits / 87 功能文件`（run `40252592779`）。
 
 **仓库已公开**：远端 `starbridge` = `https://github.com/Ylsssq926/StarBridge.git`，默认分支
-`product/daily-limit`，推的是含上游完整历史的分支（署名/`LICENSE`/`NOTICE` 原样保留），**没有推 tag**。
-分支保护已开（禁 force-push、禁删除、对 admin 生效；仍可直推），细节与回退命令见 §19 与 `docs/OPERATIONS.md`。
+`product/rc47`，推的是含上游完整历史的分支（署名/`LICENSE`/`NOTICE` 原样保留），**没有推 tag**。
+分支保护已开（禁 force-push、禁删除、对 admin 生效；仍可直推）—— 注意保护是**按分支**生效的，
+换默认分支后要在新分支上再开一次，命令见 `docs/OPERATIONS.md` §10。
 
 跟进节奏（**不要按月**）：上游 10-12/10-17/10-21/10-25 各发一个 rc，实测间隔 4~5 天，
 所以触发条件是"上游发了新 tag"，下面三条按周跑即可（都不需要凭据；非 0 退出即代表要人工处理）：
@@ -22,32 +27,23 @@ run `40190561094` 输出 `export-series: OK (commits == series)`、49 patch / 87
 ```bash
 ./scripts/upstream-sync.sh drill upstream/main   # overlap 预估 + 重放 + 构建/回归/类型门
 ./scripts/linux-gate.sh                          # Linux 容器里重跑工具层与后端回归
-git push starbridge product/daily-limit          # 触发 Product Gates，在真 runner 上重验同一套门
+git push starbridge HEAD                          # 触发 Product Gates（product/* 通配，新基线分支不用再改 workflow）
 ```
 
 已闭环且有实测背书：日 token 预算、日请求预算（含生图/按次计费）、17 种渠道类型适配、三库最小部署形态、
 协议兼容、备份恢复（`scripts/backup-drill.sh`）、只读可观测接口 `GET /api/channel/daily_usage[/:id]`
 （已进渠道抽屉面板）、JSON 批量导入渠道、GitHub hosted runner 上的三 job 门禁。
-逐条证据在 `docs/VERIFICATION.md` §3/§4/§14/§15/§16/§17/§18/§19/§20。
+逐条证据在 `docs/VERIFICATION.md` §3/§4/§14/§15/§16/§17/§18/§19/§20/§21/§22。
 
-仍未闭环、且不能由我自行闭环的两类：
+仍未闭环、且不能由我自行闭环的一类：
 
 1. 真实 Kiro/Antigravity 账号、真实国内厂商 Key 与真实出图 —— 需要凭据（任务 #9/#11）。
-2. **基线要不要从 rc.46 搬到 rc.47，仍是产品决定；但技术阻塞已经清空。** 本机 bun 已升到 1.4.4，
-   上游新入口 `bun check -b` 在 rc.47 树上实测跑绿；后端构建与三组回归也绿；冲突只有
-   `model/channel_constraint.go` 的 1 个文件 2 处（已解）。剩下的唯一前置是机制性的：
-   `UPSTREAM_BASE` 现在硬编码在两个 workflow 与文档里，直接推 rc.47 基线的分支会让
-   `commits == series` 把上游自己的提交算成我方提交、门禁立刻失真。**第①步本轮已完成**：
-   基线现在是唯一来源（`scripts/upstream-sync.sh` 的 `UPSTREAM_BASE`，用 `./scripts/upstream-sync.sh base`
-   查），三个 workflow 与运维片段里的字面量都改成问脚本（实测八个 workflow 文件里
-   `v1.0.0-rc.46` 字面量计数全为 0）。**第②步也已完成**：`product/rc47` 分支已推送，
-   `apply v1.0.0-rc.47` 重放当前 59 个提交（还是那 1 个文件 2 处），换基线只改那一行，
-   CI run `40252592779` 三 job 全绿并首次真跑上游新入口 `bun check -b`（见 §21）。
-   **只剩第③步是你的决定**：要不要把默认分支从 `product/daily-limit`(rc.46) 切到
-   `product/rc47`，以及成品版本要不要从 0.5.0 跳。我没动。
-   落地方式二选一：加性用现在这条 `product/rc47`（推荐，不动已发布历史），或改写现有分支基线
-   （加性，不动已发布历史），或改写现有分支基线
-   （需要 force-push，当前分支保护会拒绝——这是有意的）。
+
+基线搬迁（原来的第 2 类）**已全部落地**：① 基线改成唯一来源；② `product/rc47` = rc.47 + 60 个提交，
+CI run `40252592779` 三 job 全绿并首次真跑上游新入口 `bun check -b`；③ 默认分支已切到
+`product/rc47`，成品版本抬到 `0.6.0`。`product/daily-limit`（rc.46 / 0.5.0）冻结为历史，不再提交。
+切换带来的必做后续：镜像、端到端 harness 与备份演练原本是按 rc.46 的源码和镜像测的，
+0.6.0 要重打镜像并整套复跑，结果记在 §22。
 
 已知偏差，别当成已修：`reject_selection_attempts_today` 单位是选路尝试（默认配置下 1 个被挡请求计 2 次），
 精确到请求级需按 request 去重；`upstream/main` 与 rc.47 一样把前端类型入口改成了 `bun check -b`（本机 bun 已升 1.4.4，实测可跑），
