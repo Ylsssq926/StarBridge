@@ -40,8 +40,12 @@ git push starbridge product/daily-limit          # 触发 Product Gates，在真
    `commits == series` 把上游自己的提交算成我方提交、门禁立刻失真。**第①步本轮已完成**：
    基线现在是唯一来源（`scripts/upstream-sync.sh` 的 `UPSTREAM_BASE`，用 `./scripts/upstream-sync.sh base`
    查），三个 workflow 与运维片段里的字面量都改成问脚本（实测八个 workflow 文件里
-   `v1.0.0-rc.46` 字面量计数全为 0）。剩下的顺序：② 在新基线上把 `UPSTREAM_BASE` 改成新 tag →
-   推 `product/rc47` 看 CI 真绿 → ③ 才谈切换默认分支与是否跳成品版本。落地方式二选一：开 `product/rc47` 新分支
+   `v1.0.0-rc.46` 字面量计数全为 0）。**第②步也已完成**：`product/rc47` 分支已推送，
+   `apply v1.0.0-rc.47` 重放当前 59 个提交（还是那 1 个文件 2 处），换基线只改那一行，
+   CI run `40252592779` 三 job 全绿并首次真跑上游新入口 `bun check -b`（见 §21）。
+   **只剩第③步是你的决定**：要不要把默认分支从 `product/daily-limit`(rc.46) 切到
+   `product/rc47`，以及成品版本要不要从 0.5.0 跳。我没动。
+   落地方式二选一：加性用现在这条 `product/rc47`（推荐，不动已发布历史），或改写现有分支基线
    （加性，不动已发布历史），或改写现有分支基线
    （需要 force-push，当前分支保护会拒绝——这是有意的）。
 

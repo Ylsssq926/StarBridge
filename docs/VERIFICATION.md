@@ -428,5 +428,21 @@ runner 上跑过 workflow"列为未验证项；本轮推上公开仓库后，run
 | 上游节奏带来的机制改动 | 跟进单位不该是"每月"而是"每个 release"：建议 `upstream-drill.yml` 的 schedule 从每月 5 日改成每周，并在 `Product Gates` 的定时里带一句当前基线与最新 tag 的差距；真正的落地触发条件应该是"上游发了新 tag" |
 | 重放成果已固化，不会被自动清理吃掉 | 这次解完冲突的 53 个提交留在工作树 `../new-api-v1.0.0-rc.47`，已 `git branch rehearsal-rc47` 并 checkout 成命名分支（本机实测：`git symbolic-ref --short HEAD` = `rehearsal-rc47`、`git rev-list --count v1.0.0-rc.47..HEAD` = 53、脏文件 0）。原因是 `upstream-sync.sh` 的 `is_stale_replay_worktree` 只自动丢弃**游离 HEAD** 的重放树，否则下次 `drill v1.0.0-rc.47` 会先把这份成果静默删掉再重放。副作用要记住：现在再跑 `drill v1.0.0-rc.47` 会被"工作树已存在且在用"挡住，要重做先 `git worktree remove` 或换个 ref 名 |
 | 本机 bun 已升到 1.4.4，rc.47 的类型门**实测跑绿** | 用户授权后代为升级，走的是它原本的安装方式（`bun` 是 npm 全局包，不在 `~/.bun`）：`npm install -g bun@1.4.4`，`bun --version` = 1.4.4，`bun check --help` 确认该子命令存在。然后两个基线都复跑，避免"升级修好一个、弄坏另一个"：rc.47 树 `bun run typecheck` → `✓ No type errors in 1,407 files across 2 projects [23.82s]`（退出码 0）；我们自己的 rc.46 基线 `tsgo -b` → 退出码 0。C 盘反而多了约 5 GB（旧包被移除），这次升级没有以空间换功能 |
-| 我没有做的决定 | 基线是否从 rc.46 搬到 rc.47 **仍未决定，但现在的原因变了**：不再是"本机跑不了"，而是**落地前置**——`UPSTREAM_BASE` 目前硬编码在两个 workflow 与文档里（都是 `v1.0.0-rc.46`），直接把 rc.47 基线的分支推上去会让 `export-series` 把上游自己的 rc.47 提交也算成"我方提交"，`commits == series` 立刻失真、门禁变红。所以要先把基线 ref 改成"每条分支一个来源"（脚本默认值 + workflow 读取），再推 `product/rc47`，看它 CI 全绿之后才谈默认分支切换。**这条前置已于本轮完成**：`upstream-sync.sh base` 成为唯一来源，`product-gates.yml` 两处 job env 改为运行时解析、`upstream-drill.yml` 那个从未被引用却写着旧字面量的 `env` 直接删掉、`OPERATIONS.md` 的 `BASE=` 也改成问脚本；实测 8 个 workflow 文件里 `v1.0.0-rc.46` 字面量计数全为 0。成品版本与镜像是否随 rc.47 一起跳，也还没定 |
+| 我没有做的决定 | 基线是否从 rc.46 搬到 rc.47 **仍未决定，但现在的原因变了**：不再是"本机跑不了"，而是**落地前置**——`UPSTREAM_BASE` 目前硬编码在两个 workflow 与文档里（都是 `v1.0.0-rc.46`），直接把 rc.47 基线的分支推上去会让 `export-series` 把上游自己的 rc.47 提交也算成"我方提交"，`commits == series` 立刻失真、门禁变红。所以要先把基线 ref 改成"每条分支一个来源"（脚本默认值 + workflow 读取），再推 `product/rc47`，看它 CI 全绿之后才谈默认分支切换。**这条前置已于本轮完成**：`upstream-sync.sh base` 成为唯一来源，`product-gates.yml` 两处 job env 改为运行时解析、`upstream-drill.yml` 那个从未被引用却写着旧字面量的 `env` 直接删掉、`OPERATIONS.md` 的 `BASE=` 也改成问脚本；实测 8 个 workflow 文件里 `v1.0.0-rc.46` 字面量计数全为 0。成品版本与镜像是否随 rc.47 一起跳，也还没定（①② 两步已完成并有 CI 背书，见 §21）|
+
+## 21. 把 rc.47 真正落成一个可验证的分支（2026-10-26，① ② 已闭环）
+
+大白话：以前"我们跟的是上游哪个版本"这句话抄在 6 个地方，换版本时漏抄一处，自动检查就会把
+上游自己的新代码当成我们写的代码来算，报告看着绿、实际在量错的东西。现在只有 1 个地方。
+
+| 验证 | 结果 |
+|---|---|
+| ① 唯一来源 | `scripts/upstream-sync.sh` 新增 `base` 子命令；`product-gates.yml` 两处改为运行时 `Resolve the upstream base`（空值 exit 1），`upstream-drill.yml` 那个从没被引用却写旧字面量的 `env` 删掉，`OPERATIONS.md` 的 `BASE=` 改成命令替换。本地实测 `base` → `v1.0.0-rc.46`、`bash -n` 通过、两个 YAML 可解析 |
+| ① 在 runner 上生效 | run `40251915577`（基线仍是 rc.46）三 job 全绿，日志 `resolved base: v1.0.0-rc.46` |
+| ② 用当前完整 series 重放到 rc.47 | 主分支此前的彩排只有 53 个提交（落后 6 个），所以重放的是**当前 59 个提交**：`apply v1.0.0-rc.47` 两次停在同一文件的同一两处（`0001` 的 switch 插入点取并集、`0011` 的函数注释取我方），解完 `am --continue` → `applied=59 unmerged=0 dirty=0` |
+| ② 换基线只有一个动作 | 在 `product/rc47` 上把那一行改成 `v1.0.0-rc.47` 并提交（工作树内实测 `base=v1.0.0-rc.47`、`commits_above_base=60`），随后 `export-series` 报 **60 patches == 60 commits、87 个职能文件** —— 这正是重构前必然失真的一步，现在自洽 |
+| ② CI 全绿（run `40252592779`，ref `product/rc47`） | `backend` / `frontend` / `sync-integrity` 三 job 全 `success`；日志逐条：`resolved base: v1.0.0-rc.47` → `series: patches/series (60 patches, base v1.0.0-rc.47)` + `export-series: OK (commits == series)`（export 与 verify 各一次）|
+| **上游新类型入口首次被真跑** | 同一次 run 里 `==> typecheck: bun run typecheck (entry: bun check -b)` → `==> typecheck: ran`。即"上游改了类型检查命令"这件事，在我们的补丁树上、在 Linux runner 上，第一次拿到真实通过而不是跳过 |
+| 分支现状 | `product/daily-limit`（rc.46 基线，仍是仓库默认分支）与 `product/rc47`（rc.47 基线，60 提交）并存；`rehearsal-rc47` 保留作 §20 那份早期彩排的证据。切换默认分支、以及成品版本要不要从 0.5.0 跳，**是你的决定**，我没有动 |
+| 这一段不证明的事 | rc.47 一支没重跑端到端 PoC（harness 与备份演练依赖本机 Docker 栈，且镜像是按 rc.46 源码打的）；两条产品分支并存期间的文档同步靠人记（新文档提交先落在默认分支，另一支要靠重放带上）；上游 4~5 天一个 rc，意味着下一次 `drill` 大概率还会撞 `channel_constraint.go` 这两处 |
 
