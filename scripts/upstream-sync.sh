@@ -138,7 +138,10 @@ patch_files() {
 # Commit-derived series: the durable form now that the product layer lives on a
 # branch. format-patch keeps author/date per change, so an upgrade replays the
 # same history instead of one opaque working-tree diff.
-UPSTREAM_BASE="${UPSTREAM_BASE:-v1.0.0-rc.46}"
+# This line is the ONLY place the baseline ref is written down: CI and the
+# operations snippets read it via `upstream-sync.sh base`. Switching base =
+# change this one line and replay the series onto the new tag.
+UPSTREAM_BASE="${UPSTREAM_BASE:-v1.0.0-rc.47}"
 SERIES_DIR="${SERIES_DIR:-$PATCH_DIR/series}"
 
 series_change_files() {
