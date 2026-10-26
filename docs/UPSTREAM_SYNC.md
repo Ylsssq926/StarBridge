@@ -14,7 +14,7 @@
 
 | 路径 | 内容 | 基线 |
 |---|---|---|
-| `patches/series/00NN-*.patch` | **主机制**：分支提交序列（后端 / 前端 / 成品层 / gitattributes / 同步工具 / 品牌） | 由 `UPSTREAM_BASE`（默认 `v1.0.0-rc.46`）之上的提交生成 |
+| `patches/series/00NN-*.patch` | **主机制**：分支提交序列（后端 / 前端 / 成品层 / gitattributes / 同步工具 / 品牌） | 由 `UPSTREAM_BASE` 之上的提交生成（查当前值：`./scripts/upstream-sync.sh base`） |
 | `patches/legacy/0001-daily-limit-core.patch` | 后端：配置、过滤器、选路、计数、结算、任务计费 | main（历史） |
 | `patches/legacy/0002-daily-limit-web.patch` | 前端：渠道表单 + 7 语言 | main（历史） |
 | `patches/legacy/0003-console-block-adaptation.patch` | 前端：日限额登记进"其他设置"区块 | main + rc.46（历史） |
@@ -89,7 +89,8 @@ git am --abort          # 整体退回干净的 tag 状态
 
 重放模式说明：
 
-- 默认走 series（`UPSTREAM_BASE` 决定 series 的基线，默认 `v1.0.0-rc.46`）。
+- 默认走 series（`UPSTREAM_BASE` 决定 series 的基线；它是**唯一来源**，CI 与运维片段都用
+  `./scripts/upstream-sync.sh base` 读它，不再各自抄字面量）。
 - 需要退回 pre-commit 的 file patch 时：
 
 ```bash

@@ -216,7 +216,7 @@ docker start new-api-poc
 # 这些扫描命令本身写在本文档里，会和自己的文本撞上（本次实测就撞了两次），
 # 所以统一排除本文档；否则一条真泄漏会被淹没在"文档命中文档"的噪声里。
 EX=':(exclude)docs/OPERATIONS.md'
-BASE=v1.0.0-rc.46
+BASE=$(./scripts/upstream-sync.sh base)   # 基线只有一个来源，别在这里抄字面量
 git rev-list --count "$BASE"..HEAD          # 私有提交数，以输出为准，别把本文里的数字当常量
 git log -p "$BASE"..HEAD -- . "$EX" | grep -inE "sk-[A-Za-z0-9]{16,}|ghp_|gho_|-----BEGIN|AKIA[0-9A-Z]{16}" | head
 git grep -ln "Jonathan\|C:/Users" -- . "$EX"   # 本地路径/用户名

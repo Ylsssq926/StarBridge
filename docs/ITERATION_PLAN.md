@@ -37,9 +37,11 @@ git push starbridge product/daily-limit          # 触发 Product Gates，在真
    上游新入口 `bun check -b` 在 rc.47 树上实测跑绿；后端构建与三组回归也绿；冲突只有
    `model/channel_constraint.go` 的 1 个文件 2 处（已解）。剩下的唯一前置是机制性的：
    `UPSTREAM_BASE` 现在硬编码在两个 workflow 与文档里，直接推 rc.47 基线的分支会让
-   `commits == series` 把上游自己的提交算成我方提交、门禁立刻失真。所以顺序必须是
-   ① 把基线 ref 改成"每条分支一个来源"（脚本默认 + workflow 读取）→ ② 推 `product/rc47`
-   看 CI 全绿 → ③ 才谈切换默认分支与是否跳成品版本。落地方式二选一：开 `product/rc47` 新分支
+   `commits == series` 把上游自己的提交算成我方提交、门禁立刻失真。**第①步本轮已完成**：
+   基线现在是唯一来源（`scripts/upstream-sync.sh` 的 `UPSTREAM_BASE`，用 `./scripts/upstream-sync.sh base`
+   查），三个 workflow 与运维片段里的字面量都改成问脚本（实测八个 workflow 文件里
+   `v1.0.0-rc.46` 字面量计数全为 0）。剩下的顺序：② 在新基线上把 `UPSTREAM_BASE` 改成新 tag →
+   推 `product/rc47` 看 CI 真绿 → ③ 才谈切换默认分支与是否跳成品版本。落地方式二选一：开 `product/rc47` 新分支
    （加性，不动已发布历史），或改写现有分支基线
    （需要 force-push，当前分支保护会拒绝——这是有意的）。
 

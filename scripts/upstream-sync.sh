@@ -527,8 +527,14 @@ cmd_drill() {
   echo "  git worktree remove --force $target && git worktree prune"
 }
 
+# Single source for the baseline ref. CI and the operations snippets ask this
+# instead of copying the literal, because a hardcoded base in two places means a
+# baseline switch that silently miscounts our commits against upstream's own.
+cmd_base() { echo "$UPSTREAM_BASE"; }
+
 case "${1:-status}" in
   status) cmd_status ;;
+  base) cmd_base ;;
   export) cmd_export ;;
   export-series) cmd_export_series "${2:-}" ;;
   verify-series) cmd_verify_series "${2:-}" ;;
@@ -539,9 +545,10 @@ case "${1:-status}" in
   apply) cmd_apply "${2:-}" ;;
   drill) cmd_drill "${2:-}" ;;
   *)
-    echo "usage: $0 {status|export|export-series [base]|verify-series [base]|verify-patch [file]|tooling <dir>|check [dir]|check-full [dir]|apply <tag>|drill <ref>}" >&2
+    echo "usage: $0 {status|base|export|export-series [base]|verify-series [base]|verify-patch [file]|tooling <dir>|check [dir]|check-full [dir]|apply <tag>|drill <ref>}" >&2
+    echo "  base prints the baseline ref this branch replays onto (UPSTREAM_BASE)" >&2
     echo "  apply replays patches/series with git am -3 by default (base: UPSTREAM_BASE)" >&2
-    echo "  drill <ref> = export-series + apply + check in one run; use it for the monthly follow-up" >&2
+    echo "  drill <ref> = export-series + apply + check in one run; use it for the weekly follow-up" >&2
     echo "  DRILL_SKIP_EXPORT=1 makes drill reuse the existing patches/series" >&2
     echo "  USE_SERIES=0 falls back to PATCH_FILES; PATCH_FILES overrides the file-patch list" >&2
     echo "  COPY_TOOLING=0 skips copying the product layer into a new worktree" >&2
