@@ -21,8 +21,8 @@
   含"被跳过"计数（单位是选路尝试，同时返回 `retry_times`）。失效的 key 会被自动摘出池子，
   冷却结束自动回来。**多 key 渠道里每把 key 也能单独
   设日预算、每分钟请求上限（RPM）、单独看用量，并直接在渠道抽屉里编辑**：一把 key 打满或被上游限流就
-  跳过它，池子全满才返回 429；上游 429 只让当前 key 短冷却、不判死刑，同一客户端默认粘在同一把 key 上，
-  失效 key 每天自动恢复的次数有上限。
+  跳过它，池子全满才返回 429；上游 429 只让当前 key 短冷却（按上游 `Retry-After`）、不判死刑，同一客户端
+  默认粘在同一把 key 上，失效 key 每天自动恢复的次数有上限。每把 key 都能单独测试、看用量进度条。
 - **跟得上上游**：上游每 4~5 天一个 release；`./scripts/upstream-sync.sh drill <ref>` 一条命令
   完成"冲突面预估 → 重放我们的改动 → 构建 + 回归 + 类型门"。实测对最新 `main` 零冲突通过。
 
@@ -35,7 +35,7 @@ docker compose -f docker-compose.poc.yml up -d
 ```
 
 完整步骤（含"服务器上没有 Go/Bun 时怎么搬镜像"、反代与 TLS、升级回滚）见 **`docs/DEPLOY.md`**。
-镜像：`new-api-daily-limit:{0.11.0,local}`、`starbridge-gateway:{0.11.0,local}`。
+镜像：`new-api-daily-limit:{0.12.0,local}`、`starbridge-gateway:{0.12.0,local}`。
 
 ## 仓库怎么组织
 
@@ -43,7 +43,7 @@ docker compose -f docker-compose.poc.yml up -d
 |---|---|
 | `main`（默认分支） | **发布快照**：单个提交，只放能直接部署的成品，没有开发历史 |
 | 本地 `dev`（不公开） | 开发线，保留完整上游祖先链；`drill`/`export-series` 依赖它 |
-| `starbridge-0.11.0` | 最新发行 tag，指向 `main` 的唯一提交 |
+| `starbridge-0.12.0` | 最新发行 tag，指向 `main` 的唯一提交 |
 | `docs/` | `DEPLOY.md` 部署、`OPERATIONS.md` 面板与运维、`UPSTREAM_SYNC.md` 跟进上游、`VERIFICATION.md` 逐条证据、`PROVIDER_MATRIX.md` 旁路与渠道矩阵 |
 
 发布：`./scripts/publish-snapshot.sh`（把 `dev` 的树压成快照追加到 `main`）。

@@ -45,6 +45,13 @@ const server = http.createServer((req, res) => {
         return;
       }
     }
+    // Always revoked: lets the per-key probe prove a failing key without
+    // consuming the "fails once" state used by the recovery case.
+    if (auth.includes('alwaysbad')) {
+      res.writeHead(401, headers);
+      res.end(JSON.stringify({ error: { message: 'invalid api key (mock, permanent)', type: 'invalid_request_error', code: 'invalid_api_key' } }));
+      return;
+    }
     if (auth.includes('bad')) {
       // A revoked credential that "comes back": fail a limited number of times,
       // then behave. This lets the harness prove cooldown recovery deterministically

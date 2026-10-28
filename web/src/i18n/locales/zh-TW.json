@@ -7388,6 +7388,8 @@
     "Enter a whole number of at least 0, or leave the field empty for unlimited": "請輸入不小於 0 的整數，留空表示不限額",
     "Requests per minute limit": "每分鐘請求上限",
     "Cooling down after upstream rate limit: {{seconds}}s": "上游限流冷卻中：剩餘 {{seconds}} 秒",
-    "Automatic recoveries today: {{count}}": "今日自動恢復 {{count}} 次"
+    "Automatic recoveries today: {{count}}": "今日自動恢復 {{count}} 次",
+    "Key #{{index}} ({{tail}}) responded in {{seconds}}s": "Key #{{index}}（{{tail}}）回應耗時 {{seconds}} 秒",
+    "Key test failed": "Key 測試失敗"
   }
 }

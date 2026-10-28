@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	taskdto "github.com/QuantumNous/new-api/dto"
@@ -86,6 +87,13 @@ func ClaudeErrorWrapperLocal(err error, code string, statusCode int) *dto.Claude
 
 func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFail bool) (newApiErr *types.NewAPIError) {
 	newApiErr = types.InitOpenAIError(types.ErrorCodeBadResponseStatusCode, resp.StatusCode)
+	// Keep the upstream hint on the error so the per-key cooldown can honour it
+	// instead of always using the configured default.
+	defer func() {
+		if newApiErr != nil && resp != nil && resp.StatusCode == http.StatusTooManyRequests {
+			newApiErr.SetRetryAfterSeconds(parseRetryAfterSeconds(resp.Header.Get("Retry-After")))
+		}
+	}()
 
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -229,4 +237,25 @@ func TaskErrorFromAPIError(apiErr *types.NewAPIError) *taskdto.TaskError {
 		StatusCode: apiErr.StatusCode,
 		Error:      apiErr.Err,
 	}
+}
+
+// parseRetryAfterSeconds accepts the two forms RFC 9110 allows: delay-seconds
+// and an HTTP-date. Anything else (or a past date) yields 0 = no hint.
+func parseRetryAfterSeconds(value string) int64 {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	if seconds, err := strconv.ParseInt(value, 10, 64); err == nil {
+		if seconds > 0 {
+			return seconds
+		}
+		return 0
+	}
+	if when, err := http.ParseTime(value); err == nil {
+		if seconds := int64(time.Until(when).Seconds()); seconds > 0 {
+			return seconds
+		}
+	}
+	return 0
 }

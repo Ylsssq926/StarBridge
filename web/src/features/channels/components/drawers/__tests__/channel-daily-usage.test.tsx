@@ -21,7 +21,11 @@ import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { getChannelDailyUsage, updateChannelKeyDailyLimits } from '../../../api'
+import {
+  getChannelDailyUsage,
+  testChannelKey,
+  updateChannelKeyDailyLimits,
+} from '../../../api'
 import { ChannelDailyUsage } from '../channel-daily-usage'
 
 // The module id must resolve to the same file the component imports
@@ -29,10 +33,12 @@ import { ChannelDailyUsage } from '../channel-daily-usage'
 vi.mock('../../../api', () => ({
   getChannelDailyUsage: vi.fn(),
   updateChannelKeyDailyLimits: vi.fn(),
+  testChannelKey: vi.fn(),
 }))
 
 const mockedFetch = vi.mocked(getChannelDailyUsage)
 const mockedUpdate = vi.mocked(updateChannelKeyDailyLimits)
+const mockedTest = vi.mocked(testChannelKey)
 
 function usage(overrides: Record<string, unknown> = {}) {
   return {
@@ -74,6 +80,7 @@ describe('ChannelDailyUsage', () => {
     cleanup()
     mockedFetch.mockReset()
     mockedUpdate.mockReset()
+    mockedTest.mockReset()
   })
 
   it('shows both budgets with their usage and the skipped attempts', async () => {
@@ -327,6 +334,43 @@ describe('ChannelDailyUsage', () => {
     expect(
       screen.getByText('Automatic recoveries today: 2')
     ).toBeInTheDocument()
+  })
+
+  it('tests a single key through the API', async () => {
+    mockedFetch.mockResolvedValue(
+      usage({
+        daily_token_limit: 0,
+        daily_request_limit: 0,
+        keys: [
+          {
+            index: 0,
+            key_tail: '***ey-a',
+            status: 1,
+            disabled_reason: '',
+            disabled_time: 0,
+            daily_token_limit: 0,
+            tokens_used: 0,
+            daily_request_limit: 0,
+            requests_used: 0,
+            rpm_limit: 0,
+            cooldown_remaining_seconds: 0,
+            recoveries_today: 0,
+          },
+        ],
+      }) as never
+    )
+    mockedTest.mockResolvedValue({
+      success: true,
+      message: '',
+      time: 0.12,
+      index: 0,
+      key_tail: '***ey-a',
+    } as never)
+    await renderUsage()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Test' }))
+
+    await vi.waitFor(() => expect(mockedTest).toHaveBeenCalledWith(5, 0))
   })
 
   it('renders nothing when the channel has no budget configured', async () => {

@@ -65,6 +65,7 @@ var channelPermissionRoutes = []permissionRoute{
 	{method: http.MethodGet, path: "/ops", permission: authz.ChannelRead, handler: controller.GetChannelOps},
 	{method: http.MethodGet, path: "/daily_usage", permission: authz.ChannelRead, handler: controller.GetChannelDailyUsage},
 	{method: http.MethodPut, path: "/:id/key_daily_limits", permission: authz.ChannelWrite, handler: controller.UpdateChannelKeyDailyLimits},
+	{method: http.MethodPost, path: "/:id/test_key", permission: authz.ChannelOperate, handler: controller.TestChannelKey},
 	{method: http.MethodGet, path: "/daily_usage/:id", permission: authz.ChannelRead, handler: controller.GetChannelDailyUsage},
 	{method: http.MethodGet, path: "/:id", permission: authz.ChannelRead, handler: controller.GetChannel},
 	{method: http.MethodGet, path: "/test", permission: authz.ChannelOperate, handler: controller.TestAllChannels},

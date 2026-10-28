@@ -678,3 +678,19 @@ GitGuardian 发来说 `Ylsssq926/StarBridge` 泄露了一个 "Generic Password"�
 | 质量门 | `go build ./...`；`go test ./model`（新增恢复持久化与恢复上限用例）、`./router` 全包、`./service` 定向、`./common -run Daily|Key` 全通过；`relaykit` 在 `GOWORK=off` 下独立构建通过；前端 `tsgo -b` 无错、组件测试 8/8、oxlint 改动文件 0 错 |
 | 镜像 | `new-api-daily-limit:{0.11.0,local}`、`starbridge-gateway:{0.11.0,local}`；容器 `/api/status` 自报 `version: 0.11.0` |
 | 这一段不证明的事 | 多实例下的 RPM/冷却只做了代码路径（Redis）与单实例实测，没有起第二个网关实例对打；粘性 TTL 到期、恢复上限"到顶转人工"没有端到端跑（前者靠 TTL 语义，后者靠单表测试）；冷却时长没有读取上游 `Retry-After`，是固定选项（kiro.rs 会优先采用上游值）；旁路容器的 UA/域名/出口 IP/设备标识完全没动，所以"不太封号"仍取决于旁路配置与真实账号行为，本版只保证网关侧不主动制造封号诱因（突发、重复打限流账号、账号频繁切换） |
+
+## 34. 冷却采用上游 Retry-After、单 key 探测、用量进度条（0.12.0，2026-10-28）
+
+0.11.0 把账号保护的骨架搭好后，这一版补三个"operator 手感"上的缺口：限流时长听上游的、
+坏 key 不用整池禁用就能单独验证、面板能看到每把 key 用了多少。
+
+| 事项 | 结果 |
+|---|---|
+| 冷却采用上游 `Retry-After` | `RelayErrorHandler` 现在把 429 响应的 `Retry-After` 挂在错误上（支持 delay-seconds 与 HTTP-date），`MarkKeyRateLimited` 优先使用它，缺失才回退到 `KeyRateLimitCooldownSeconds`；仍统一夹在 1..600 秒。单测覆盖 `"2"` / `"0"` / 负数 / 乱码 / 空值；harness 中 mock 发 `Retry-After: 2`、选项故意设为 60，实测 `cooldown=2` |
+| 单把 key 探测 | 新接口 `POST /api/channel/:id/test_key`（`ChannelOperate`）：把渠道复制成"单 key"副本交给现有 `testChannel`，不发账单、不改 key/渠道状态；返回 `{success,time,index,key_tail,error_code}`，形状与渠道测试一致。面板每把 key 旁有「Test」按钮，成功 toast 显示尾号与耗时 |
+| 用量进度条 | 每行"已用 / 限额"下面加了 `role="progressbar"` 的细条（`aria-valuenow`），达到 100% 变色；未设限额不显示。浏览器里实测多 key 面板出现 4 条（2 key × 2 维度） |
+| 端到端 | 最终镜像连跑两次 **33/33**（新增单 key 探测用例：永久 401 的 key 测试失败、健康 key 成功且两把 key 状态都保持 1）。浏览器：真实 Chrome 打开面板 → 4 条进度条 → 点第一把 key 的「Test」→ toast「Key #0（***ey-a）响应耗时 0.11 秒」 |
+| 启动踩坑 | 有一次 harness 全量 500 `do_request_failed`：旧 mock 进程仍占着 3999，新 mock `EADDRINUSE` 退出，而 `curl /__reset` 命中的是旧进程（它当然返回 ok）。确认方式：直接打 mock、看 `mock=000` 与 mock 日志的 `address: '0.0.0.0', port: 3999`。清掉监听进程重启后 33/33。以后起 mock 必须先确认端口空 |
+| 质量门 | `go build ./...`；`router` 全包（新路由需要写进权限表，访问令牌 scope 由权限自动派生，重复声明会被 `declared twice` 测试抓住）；`service` 单测（Retry-After 解析与错误携带）；`relaykit` 独立构建；前端类型检查、组件测试 9/9、lint/格式（改动文件） |
+| 镜像 | `new-api-daily-limit:{0.12.0,local}`、`starbridge-gateway:{0.12.0,local}`；容器 `/api/status` 自报 `version: 0.12.0` |
+| 这一段不证明的事 | `Retry-After` 的 HTTP-date 形式只有单测，mock 只发秒数；探测对 embedding/图像/流式模型没有专门用例（走的是同一条 `testChannel`，但未逐一实测）；进度条只在 Chromium 下看过；冷却上限 600 秒没有端到端触发 |

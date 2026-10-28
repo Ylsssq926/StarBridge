@@ -7388,6 +7388,8 @@
     "Enter a whole number of at least 0, or leave the field empty for unlimited": "Введите целое число не меньше 0 или оставьте поле пустым, чтобы снять ограничение",
     "Requests per minute limit": "Лимит запросов в минуту",
     "Cooling down after upstream rate limit: {{seconds}}s": "Пауза после ограничения upstream: осталось {{seconds}} с",
-    "Automatic recoveries today: {{count}}": "Автоматических восстановлений сегодня: {{count}}"
+    "Automatic recoveries today: {{count}}": "Автоматических восстановлений сегодня: {{count}}",
+    "Key #{{index}} ({{tail}}) responded in {{seconds}}s": "Ключ #{{index}} ({{tail}}) ответил за {{seconds}} с",
+    "Key test failed": "Проверка ключа не удалась"
   }
 }

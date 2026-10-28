@@ -104,6 +104,8 @@ type NewAPIError struct {
 	errorCode      ErrorCode
 	StatusCode     int
 	Metadata       json.RawMessage
+	// retryAfterSeconds is the upstream Retry-After hint, when it sent one.
+	retryAfterSeconds int64
 }
 
 // Unwrap enables errors.Is / errors.As to work with NewAPIError by exposing the underlying error.
@@ -119,6 +121,21 @@ func (e *NewAPIError) GetErrorCode() ErrorCode {
 		return ""
 	}
 	return e.errorCode
+}
+
+// SetRetryAfterSeconds records the upstream Retry-After hint on the error.
+func (e *NewAPIError) SetRetryAfterSeconds(seconds int64) {
+	if e != nil {
+		e.retryAfterSeconds = seconds
+	}
+}
+
+// RetryAfterSeconds returns the upstream Retry-After hint, or 0 when absent.
+func (e *NewAPIError) RetryAfterSeconds() int64 {
+	if e == nil {
+		return 0
+	}
+	return e.retryAfterSeconds
 }
 
 func (e *NewAPIError) GetErrorType() ErrorType {

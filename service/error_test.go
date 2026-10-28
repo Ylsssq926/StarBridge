@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -157,4 +158,36 @@ func withDebugEnabled(t *testing.T, enabled bool) {
 	t.Cleanup(func() {
 		common.DebugEnabled = oldDebug
 	})
+}
+
+func TestParseRetryAfterSeconds(t *testing.T) {
+	cases := []struct {
+		name  string
+		value string
+		want  int64
+	}{
+		{"delay seconds", "2", 2},
+		{"zero is no hint", "0", 0},
+		{"negative is no hint", "-5", 0},
+		{"garbage is no hint", "soon", 0},
+		{"empty is no hint", "", 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, parseRetryAfterSeconds(tc.value))
+		})
+	}
+}
+
+func TestRelayErrorHandlerKeepsRetryAfterHint(t *testing.T) {
+	resp := &http.Response{
+		StatusCode: http.StatusTooManyRequests,
+		Header:     http.Header{"Retry-After": []string{"7"}},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"rate limited","type":"rate_limit_error"}}`)),
+	}
+
+	newAPIError := RelayErrorHandler(context.Background(), resp, false)
+
+	require.NotNil(t, newAPIError)
+	assert.Equal(t, int64(7), newAPIError.RetryAfterSeconds())
 }

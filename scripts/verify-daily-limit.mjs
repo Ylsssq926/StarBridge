@@ -12,12 +12,14 @@ const MK_AUTO_NAME = 'verify-multi-key-auto';
 const MK_RPM_NAME = 'verify-multi-key-rpm';
 const MK_RATE_NAME = 'verify-multi-key-429';
 const MK_AFFINITY_NAME = 'verify-multi-key-affinity';
+const MK_PROBE_NAME = 'verify-multi-key-probe';
 const IMAGE_MODEL = 'verify-image-model';
 const REQUEST_MODEL = 'verify-request-model';
 const RPM_MODEL = 'verify-rpm-model';
 const RATE_MODEL = 'verify-rate-model';
 const AFFINITY_MODEL = 'verify-affinity-model';
 const AUTO_MODEL = 'verify-auto-model';
+const PROBE_MODEL = 'verify-probe-model';
 const TOKEN_NAME = 'verify-daily-limit';
 const MODEL = 'mock-model';
 
@@ -215,7 +217,7 @@ async function main() {
     method: 'PUT',
     body: {
       key: 'ModelPrice',
-      value: JSON.stringify({ [MODEL]: 0.01, [IMAGE_MODEL]: 0.01, [REQUEST_MODEL]: 0.01, [RPM_MODEL]: 0.01, [RATE_MODEL]: 0.01, [AFFINITY_MODEL]: 0.01, [AUTO_MODEL]: 0.01 }),
+      value: JSON.stringify({ [MODEL]: 0.01, [IMAGE_MODEL]: 0.01, [REQUEST_MODEL]: 0.01, [RPM_MODEL]: 0.01, [RATE_MODEL]: 0.01, [AFFINITY_MODEL]: 0.01, [AUTO_MODEL]: 0.01, [PROBE_MODEL]: 0.01 }),
     },
   });
   record('model price configured', priced.json.success === true, 'option=ModelPrice');
@@ -520,7 +522,7 @@ async function main() {
   // the pool moves the next request to another key. After the cooldown the key
   // is selectable again (the mock answers 429 only on the first hit).
   // Key affinity is off for this case so polling reaches the second key.
-  await api('/api/option/', { method: 'PUT', body: { key: 'KeyRateLimitCooldownSeconds', value: '5' } });
+  await api('/api/option/', { method: 'PUT', body: { key: 'KeyRateLimitCooldownSeconds', value: '60' } });
   await api('/api/option/', { method: 'PUT', body: { key: 'KeyAffinityTTLSeconds', value: '0' } });
   const rateChannel = await createMultiKeyChannel(MK_RATE_NAME, 'rate429-key\nmock-key-b', RATE_MODEL);
   if (rateChannel) {
@@ -544,10 +546,11 @@ async function main() {
       'multi-key: upstream 429 cools the key down and the other key serves',
       rate1.status === 429 &&
         (rateKey0?.cooldown_remaining_seconds || 0) > 0 &&
+        (rateKey0?.cooldown_remaining_seconds || 0) <= 2 &&
         rate2.status === 200 && rateUsed1 === 1 && (rateUsed0 || 0) === 0,
-      `first=${rate1.status}/${rate1.code || '-'} cooldown=${rateKey0?.cooldown_remaining_seconds} second=${rate2.status} used=${rateUsed0}/${rateUsed1}`
+      `first=${rate1.status}/${rate1.code || '-'} cooldown=${rateKey0?.cooldown_remaining_seconds} (Retry-After=2, option=60) second=${rate2.status} used=${rateUsed0}/${rateUsed1}`
     );
-    await new Promise((r) => setTimeout(r, 6000));
+    await new Promise((r) => setTimeout(r, 3000));
     const rate3 = await relayChat(apiKey, RATE_MODEL);
     const rateUsage3 = await api(`/api/channel/daily_usage/${rateChannel.id}`);
     const rateKey0After = (rateUsage3.json?.data?.keys || []).find((row) => row.index === 0);
@@ -586,6 +589,28 @@ async function main() {
     await api(`/api/channel/${affinityChannel.id}`, { method: 'DELETE' });
   } else {
     record('multi-key affinity channel created', false, 'create failed');
+  }
+
+  // Case 10d: per-key probe. A permanently revoked key fails its own test, a
+  // healthy key passes, and the test never changes either key's status.
+  const probeChannel = await createMultiKeyChannel(MK_PROBE_NAME, ['alwaysbad-key', 'mock-key-b'].join(String.fromCharCode(10)), PROBE_MODEL);
+  if (probeChannel) {
+    const probeBad = await api(`/api/channel/${probeChannel.id}/test_key`, { method: 'POST', body: { index: 0 } });
+    const probeGood = await api(`/api/channel/${probeChannel.id}/test_key`, { method: 'POST', body: { index: 1 } });
+    await new Promise((r) => setTimeout(r, 500));
+    const probeUsage = await api(`/api/channel/daily_usage/${probeChannel.id}`);
+    const probeKeys = probeUsage.json?.data?.keys || [];
+    record(
+      'multi-key: a single key can be probed without disabling it',
+      probeBad.json.success === false && probeGood.json.success === true &&
+        (probeGood.json.time || 0) > 0 &&
+        probeKeys.find((row) => row.index === 0)?.status === 1 &&
+        probeKeys.find((row) => row.index === 1)?.status === 1,
+      `bad=${probeBad.json.success} good=${probeGood.json.success} time=${probeGood.json.time} statuses=${probeKeys.map((row) => row.status).join('/')}`
+    );
+    await api(`/api/channel/${probeChannel.id}`, { method: 'DELETE' });
+  } else {
+    record('multi-key probe channel created', false, 'create failed');
   }
 
   // The auto-disable case needs polling to reach the failing key, so affinity
@@ -710,7 +735,7 @@ async function main() {
   record('token cleaned up', afterRows.filter((t) => t?.name === TOKEN_NAME).length === 0, `left=${afterRows.length}`);
 
   for (const stray of await listChannels()) {
-    if (['price-probe', CHANNEL_NAME, IMAGE_CHANNEL_NAME, REQUEST_CHANNEL_NAME, UG_CHANNEL_NAME, MK_CHANNEL_NAME, MK_AUTO_NAME, MK_RPM_NAME, MK_RATE_NAME, MK_AFFINITY_NAME].includes(stray.name)) {
+    if (['price-probe', CHANNEL_NAME, IMAGE_CHANNEL_NAME, REQUEST_CHANNEL_NAME, UG_CHANNEL_NAME, MK_CHANNEL_NAME, MK_AUTO_NAME, MK_RPM_NAME, MK_RATE_NAME, MK_AFFINITY_NAME, MK_PROBE_NAME].includes(stray.name)) {
       await api(`/api/channel/${stray.id}`, { method: 'DELETE' });
     }
   }

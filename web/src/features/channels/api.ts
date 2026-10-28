@@ -236,6 +236,31 @@ export async function updateChannelKeyDailyLimits(
   return res.data
 }
 
+export interface TestChannelKeyResponse {
+  success: boolean
+  message?: string
+  time?: number
+  index: number
+  key_tail: string
+  error_code?: string
+}
+
+/**
+ * Send one minimal request through a specific key of a multi-key channel.
+ * Never bills and never changes key status.
+ */
+export async function testChannelKey(
+  id: number,
+  index: number,
+  model?: string
+): Promise<TestChannelKeyResponse> {
+  const res = await api.post(`/api/channel/${id}/test_key`, {
+    index,
+    ...(model ? { model } : {}),
+  })
+  return res.data
+}
+
 /**
  * Get channel operations summary for administrators
  */

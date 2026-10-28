@@ -7388,6 +7388,8 @@
     "Enter a whole number of at least 0, or leave the field empty for unlimited": "Saisissez un nombre entier supérieur ou égal à 0, ou laissez vide pour illimité",
     "Requests per minute limit": "Limite de requêtes par minute",
     "Cooling down after upstream rate limit: {{seconds}}s": "Refroidissement après limitation amont : {{seconds}} s restantes",
-    "Automatic recoveries today: {{count}}": "Récupérations automatiques aujourd’hui : {{count}}"
+    "Automatic recoveries today: {{count}}": "Récupérations automatiques aujourd’hui : {{count}}",
+    "Key #{{index}} ({{tail}}) responded in {{seconds}}s": "La clé #{{index}} ({{tail}}) a répondu en {{seconds}} s",
+    "Key test failed": "Échec du test de la clé"
   }
 }

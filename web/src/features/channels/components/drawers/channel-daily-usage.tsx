@@ -13,6 +13,7 @@ import { requireServerSuccess } from '@/lib/server-error-message'
 
 import {
   getChannelDailyUsage,
+  testChannelKey,
   updateChannelKeyDailyLimits,
   type ChannelDailyUsage as DailyUsage,
 } from '../../api'
@@ -28,21 +29,39 @@ function UsageRow({
   limit: number
 }) {
   const { t } = useTranslation()
+  const percent =
+    limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0
 
   return (
-    <div className='flex items-baseline justify-between gap-3 text-xs'>
-      <span className='text-muted-foreground'>{label}</span>
-      <span className='font-medium tabular-nums'>
-        {limit > 0 ? (
-          <>
-            {formatNumber(used)} / {formatNumber(limit)}
-          </>
-        ) : (
-          <>
-            {formatNumber(used)} · <span>{t('Unlimited')}</span>
-          </>
-        )}
-      </span>
+    <div>
+      <div className='flex items-baseline justify-between gap-3 text-xs'>
+        <span className='text-muted-foreground'>{label}</span>
+        <span className='font-medium tabular-nums'>
+          {limit > 0 ? (
+            <>
+              {formatNumber(used)} / {formatNumber(limit)}
+            </>
+          ) : (
+            <>
+              {formatNumber(used)} · <span>{t('Unlimited')}</span>
+            </>
+          )}
+        </span>
+      </div>
+      {limit > 0 ? (
+        <div
+          role='progressbar'
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={percent}
+          className='bg-muted mt-1 h-1 w-full overflow-hidden rounded'
+        >
+          <div
+            className={`h-full rounded ${percent >= 100 ? 'bg-destructive' : 'bg-primary'}`}
+            style={{ width: `${percent}%` }}
+          />
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -112,6 +131,7 @@ export function ChannelDailyUsage({ channelId }: { channelId: number }) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [draft, setDraft] = useState<KeyBudgetDraft | null>(null)
+  const [testingKey, setTestingKey] = useState<number | null>(null)
 
   const { data, isLoading, isError, refetch, isFetching } = useQuery({
     queryKey: channelsQueryKeys.dailyUsage(channelId),
@@ -193,6 +213,26 @@ export function ChannelDailyUsage({ channelId }: { channelId: number }) {
         ? { ...current, [index]: { ...current[index], [field]: value } }
         : current
     )
+  }
+
+  const runKeyTest = async (index: number) => {
+    setTestingKey(index)
+    try {
+      const result = await requireServerSuccess(
+        await testChannelKey(channelId, index)
+      )
+      toast.success(
+        t('Key #{{index}} ({{tail}}) responded in {{seconds}}s', {
+          index: result.index,
+          tail: result.key_tail,
+          seconds: (result.time ?? 0).toFixed(2),
+        })
+      )
+    } catch (error) {
+      handleServerError(error, t('Key test failed'))
+    } finally {
+      setTestingKey(null)
+    }
   }
 
   const startEditing = (keys: NonNullable<DailyUsage['keys']>) => {
@@ -300,8 +340,23 @@ export function ChannelDailyUsage({ channelId }: { channelId: number }) {
             {usage.keys.map((key) => (
               <div key={key.index} className='space-y-1'>
                 <div className='flex items-center justify-between gap-2 text-xs'>
-                  <span className='font-medium'>
-                    #{key.index} {key.key_tail}
+                  <span className='flex items-center gap-1'>
+                    <span className='font-medium'>
+                      #{key.index} {key.key_tail}
+                    </span>
+                    {draft === null ? (
+                      <Button
+                        type='button'
+                        variant='ghost'
+                        size='xs'
+                        disabled={testingKey !== null}
+                        onClick={() => {
+                          void runKeyTest(key.index)
+                        }}
+                      >
+                        {testingKey === key.index ? t('Testing...') : t('Test')}
+                      </Button>
+                    ) : null}
                   </span>
                   {key.status !== 1 ? (
                     <span className='text-destructive'>

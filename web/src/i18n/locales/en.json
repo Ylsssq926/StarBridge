@@ -7388,6 +7388,8 @@
     "Enter a whole number of at least 0, or leave the field empty for unlimited": "Enter a whole number of at least 0, or leave the field empty for unlimited",
     "Requests per minute limit": "Requests per minute limit",
     "Cooling down after upstream rate limit: {{seconds}}s": "Cooling down after upstream rate limit: {{seconds}}s",
-    "Automatic recoveries today: {{count}}": "Automatic recoveries today: {{count}}"
+    "Automatic recoveries today: {{count}}": "Automatic recoveries today: {{count}}",
+    "Key #{{index}} ({{tail}}) responded in {{seconds}}s": "Key #{{index}} ({{tail}}) responded in {{seconds}}s",
+    "Key test failed": "Key test failed"
   }
 }

@@ -76,10 +76,14 @@ func MarkKeyRateLimited(relayInfo *relaycommon.RelayInfo, err *types.NewAPIError
 	if err.StatusCode != http.StatusTooManyRequests {
 		return
 	}
-	seconds := keyRateLimitCooldownSeconds()
+	seconds := err.RetryAfterSeconds()
+	if seconds <= 0 {
+		seconds = keyRateLimitCooldownSeconds()
+	}
 	if seconds <= 0 {
 		return
 	}
+	seconds = min(seconds, int64(common.MaxKeyRateLimitCooldownSeconds))
 	common.SetKeyCooldown(relayInfo.ChannelId, relayInfo.ChannelMultiKeyIndex, seconds)
 	common.SysLog(common.LogText("multi-key channel #%d: key #%d cooled down for %d seconds after upstream 429", relayInfo.ChannelId, relayInfo.ChannelMultiKeyIndex, seconds))
 }
