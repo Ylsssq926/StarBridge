@@ -1,0 +1,75 @@
+name: Upstream Drill
+# 每周把本方 series 重放到最新上游 main 并跑门禁。它**不是**发布门禁：演练失败
+# 是"这一版要人工处理"的信号，所以不刷红，只把结论写进 summary 与产物日志。
+# 节奏改成每周的理由是实测：上游 rc.44/45/46/47 分别在 10-12/10-17/10-21/10-25 发布，
+# 间隔 4~5 天，"每月一次"会让冲突在上游那边积累成一个月的量（见 docs/VERIFICATION.md §20）。
+# schedule 只在默认分支上生效——`product/daily-limit` 已是本仓默认分支，所以这条定时
+# 会跑。但 GitHub 只在工作流被"注册"后才列得出来：本文件推进去后 `GET /actions/workflows`
+# 仍看不到它（因此尚未有过一次真实触发），改动本文件并推送即为注册时机。
+on:
+  schedule:
+    - cron: "0 3 * * 0"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 上游 ref（默认 upstream/main）
+        required: false
+        default: upstream/main
+permissions:
+  contents: read
+concurrency:
+  group: upstream-drill
+  cancel-in-progress: true
+
+jobs:
+  drill:
+    runs-on: ubuntu-latest
+    # 这里不再定义 UPSTREAM_BASE：这个 job 从来没用过它，而它写的是字面量旧基线。
+    # 基线一律由 scripts/upstream-sync.sh 的 UPSTREAM_BASE 提供（`base` 子命令可查）。
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 导出 series 需要完整历史与上游 tag。
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Replay the series onto the newest upstream ref and run the gates
+        id: drill
+        continue-on-error: true
+        run: |
+          # git am 需要 committer 身份，runner 默认没有。
+          git config user.name "Upstream Drill"
+          git config user.email "ci@invalid"
+          # 日志必须落在 logs/：它既在 .gitignore 里，也已声明为同步脚本的 ARTIFACT_DIRS。
+          # 第一版写在仓库根的 drill.log，被 export-series 的 fail-closed 守卫当成
+          # "未提交的职能改动"而拒绝（run 40191317746 实测 drill_exit=1，2 秒就退出，
+          # 根本没走到重放）。守卫是对的，写错位置的是这里。
+          mkdir -p logs
+          LOG=logs/drill.log
+          status=0
+          ./scripts/upstream-sync.sh drill "${{ inputs.ref || 'upstream/main' }}" \
+            > "$LOG" 2>&1 || status=$?
+          echo "drill_exit=$status" >> "$LOG"
+          tail -40 "$LOG"
+          # 让这一步自己保留失败状态（显示 ⚠），但 job 因为 continue-on-error 仍然绿。
+          exit "$status"
+      - name: Summarise
+        if: always()
+        run: |
+          LOG=logs/drill.log
+          {
+            echo "## Upstream drill against the newest main"
+            echo '```'
+            grep -E 'drill_exit=|DRILL (OK|FAILED)|overlap with|Patch failed|conflicted files:|^ +[a-zA-Z0-9_./-]+$' "$LOG" || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: drill-log
+          path: logs/drill.log

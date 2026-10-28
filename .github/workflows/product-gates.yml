@@ -1,0 +1,168 @@
+name: Product Gates
+
+# 私有成品层的门禁，独立于上游 ci.yml：新增文件不扩大合并冲突面，
+# 上游 workflow 变动时这里不受影响。
+
+on:
+  pull_request:
+  push:
+    branches:
+      # 对外只有 `main`（发布快照，单提交历史）；开发在有完整历史的 `dev`。
+      # 两条都要跑，否则最坏的情况是"默认分支上的推送不再跑门"而没人发现。
+      - main
+      - dev
+  workflow_dispatch:
+  schedule:
+    # 每周一 03:00 UTC：即使没人提 PR，也检查与上游的偏移是否可重放。
+    - cron: '0 3 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: product-gates-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build main module
+        run: |
+          # main.go embeds web/dist, which is gitignored: a fresh checkout has no
+          # bundle. Upstream's ci.yml does the same placeholder before building.
+          mkdir -p web/dist
+          touch web/dist/index.html
+          go build ./...
+      - name: Build relaykit module
+        run: cd relaykit && GOWORK=off go build ./...
+      - name: Daily limit unit tests
+        run: go test ./common -run Daily -count=1
+      - name: Channel selection unit tests
+        run: go test ./model -run 'Daily|FilterCandidate|TaskPlugin' -count=1
+      - name: Task billing regression
+        run: go test ./service -run 'TestSettle_|TestTaskBilling|TestLogTaskConsumption|TestRecalculate' -count=1
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 按改动文件 lint 的那一步要跟上游基线比 diff，浅克隆里没有那个 tag。
+          fetch-depth: 0
+      - name: Resolve the upstream base
+        run: |
+          # 基线只有一个来源：scripts/upstream-sync.sh 里的 UPSTREAM_BASE。
+          # workflow 里抄字面量的话，换基线时漏改一处，就会把上游自己的提交
+          # 当成"我方提交"来算，commits == series 那道校验当场失真。
+          base=$(./scripts/upstream-sync.sh base)
+          [ -n "$base" ] || { echo "ERROR: upstream-sync.sh base returned empty" >&2; exit 1; }
+          echo "UPSTREAM_BASE=$base" >> "$GITHUB_ENV"
+          echo "resolved base: $base"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install
+        working-directory: web
+        run: bun install --frozen-lockfile
+      - name: Typecheck
+        working-directory: web
+        run: bun run typecheck
+      - name: Channel feature tests
+        working-directory: web
+        run: bunx vitest run src/features/channels
+      - name: Lint only our own surface
+        working-directory: web
+        run: |
+          # 上游整树 lint 本身有既存告警（基线 rc.46 与本树都是 66 warnings / 158 errors），
+          # 所以门禁只要求"我们碰过的文件"保持 0/0，避免把上游债务背进私有补丁。
+          # 三处必须 fail-closed，因为这一版曾经静默通过：
+          #   1) `|| true` 挂在取 diff 的行上，tag 缺失时打印 "no files changed" 就算过；
+          #   2) pathspec 相对当前目录，working-directory 是 web 时 'web/src' 指的是
+          #      web/web/src，永远为空 —— 用 ':/…' 锚到仓库根；
+          #   3) 本仓没有上游 tag（git ls-remote --tags 为 0 条），fetch-depth: 0 也带不来。
+          #      基线 ref 统一由同步脚本的 upstream remote 机制取回，与本仓其他门禁同源，
+          #      不在这里另抄一份 URL 或改成"没有 tag 就跳过"。
+          git rev-parse --verify -q "$UPSTREAM_BASE^{commit}" >/dev/null \
+            || ../scripts/upstream-sync.sh status
+          git rev-parse --verify "$UPSTREAM_BASE^{commit}" >/dev/null || {
+            echo "ERROR: base tag $UPSTREAM_BASE is unavailable; the lint gate" >&2
+            echo "       cannot tell our files from upstream's. Fix the fetch, don't skip it." >&2
+            exit 1
+          }
+          changed=$(git diff --name-only "$UPSTREAM_BASE"..HEAD -- ':/web/src')
+          files=$(printf '%s\n' "$changed" | sed 's|^web/||' | grep -E '\.(ts|tsx)$' || true)
+          if [ -z "$files" ]; then echo "no frontend files changed since $UPSTREAM_BASE"; exit 0; fi
+          echo "linting $(printf '%s\n' "$files" | grep -c .) file(s) we touched:"
+          echo "$files"
+          ./node_modules/.bin/oxlint -c .oxlintrc.json $files
+      - name: Build production bundle
+        working-directory: web
+        run: |
+          # 上游 CI 只做 typecheck + test，产物打包在镜像构建里才跑；这里补上，
+          # 否则"类型通过但打包失败"的改动能一路绿到发版。
+          bun run build
+          test -f dist/index.html || { echo "ERROR: bun run build produced no dist/index.html" >&2; exit 1; }
+          ls -l dist | head
+
+  sync-integrity:
+    # 只在开发线（dev）跑：这一块验的是"补丁能重放到基线 tag 上"，依赖分支带有上游祖先链。
+    # 快照分支 main 的提交是根提交（历史从零开始），format-patch 会把整棵树当成一个补丁，
+    # series 模型对它不成立（实测：main 上导出 1 patch / 2703 文件，覆盖校验必然报错）。
+    # main 上由 backend + frontend 两个 job 证明"这棵树能构建、测试能过"，重放正确性由 dev 与每周 drill 保证。
+    if: github.ref_name != 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 重放校验需要完整历史与上游 tag。
+          fetch-depth: 0
+      - name: Resolve the upstream base
+        run: |
+          # 同 frontend job：基线只从同步脚本取，别在这儿抄字面量。
+          base=$(./scripts/upstream-sync.sh base)
+          [ -n "$base" ] || { echo "ERROR: upstream-sync.sh base returned empty" >&2; exit 1; }
+          echo "UPSTREAM_BASE=$base" >> "$GITHUB_ENV"
+          echo "resolved base: $base"
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: oven-sh/setup-bun@v2
+        with:
+          # `check` 会在重放工作树里装依赖并跑类型门，runner 默认没有 bun。
+          bun-version: latest
+      - name: Show drift against upstream
+        run: ./scripts/upstream-sync.sh status
+      - name: Export the commit series and verify coverage
+        run: |
+          ./scripts/upstream-sync.sh export-series "$UPSTREAM_BASE"
+          ./scripts/upstream-sync.sh verify-series "$UPSTREAM_BASE"
+      - name: Replay the series onto its base tag and build it there
+        run: |
+          # git am needs a committer identity; the runner has none by default.
+          git config user.name "Product Gates CI"
+          git config user.email "ci@invalid"
+          ./scripts/upstream-sync.sh apply "$UPSTREAM_BASE"
+      - name: Build and test the replayed tree
+        run: |
+          worktree="../new-api-$UPSTREAM_BASE"
+          # main.go embeds web/dist. Upstream's own backend job creates a placeholder
+          # for it, so do the same here instead of handing a bundle between jobs:
+          # the previous version downloaded an artifact the frontend job never built,
+          # so the upload was empty and this job died on the missing artifact.
+          mkdir -p "$worktree/web/dist"
+          touch "$worktree/web/dist/index.html"
+          # 复用同一个脚本而不是在 CI 里重抄一遍命令：本地 `drill` 跑绿什么，
+          # 这里就绿什么（否则两边的门禁会各自漂移）。
+          ./scripts/upstream-sync.sh check "$worktree"
+      - name: Validate compose configuration
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          cp .env.product.example .env
+          docker compose -f docker-compose.poc.yml config --quiet
