@@ -7385,6 +7385,9 @@
     "Edit per-key budgets": "Sửa ngân sách từng key",
     "Per-key daily budgets saved": "Đã lưu ngân sách hằng ngày cho từng key",
     "Failed to save per-key daily budgets": "Lưu ngân sách hằng ngày cho từng key thất bại",
-    "Enter a whole number of at least 0, or leave the field empty for unlimited": "Nhập số nguyên không nhỏ hơn 0, hoặc để trống để không giới hạn"
+    "Enter a whole number of at least 0, or leave the field empty for unlimited": "Nhập số nguyên không nhỏ hơn 0, hoặc để trống để không giới hạn",
+    "Requests per minute limit": "Giới hạn yêu cầu mỗi phút",
+    "Cooling down after upstream rate limit: {{seconds}}s": "Đang tạm nghỉ sau khi upstream giới hạn: còn {{seconds}} giây",
+    "Automatic recoveries today: {{count}}": "Số lần tự phục hồi hôm nay: {{count}}"
   }
 }

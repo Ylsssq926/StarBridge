@@ -7385,6 +7385,9 @@
     "Edit per-key budgets": "Изменить суточные лимиты по ключам",
     "Per-key daily budgets saved": "Суточные лимиты по ключам сохранены",
     "Failed to save per-key daily budgets": "Не удалось сохранить суточные лимиты по ключам",
-    "Enter a whole number of at least 0, or leave the field empty for unlimited": "Введите целое число не меньше 0 или оставьте поле пустым, чтобы снять ограничение"
+    "Enter a whole number of at least 0, or leave the field empty for unlimited": "Введите целое число не меньше 0 или оставьте поле пустым, чтобы снять ограничение",
+    "Requests per minute limit": "Лимит запросов в минуту",
+    "Cooling down after upstream rate limit: {{seconds}}s": "Пауза после ограничения upstream: осталось {{seconds}} с",
+    "Automatic recoveries today: {{count}}": "Автоматических восстановлений сегодня: {{count}}"
   }
 }

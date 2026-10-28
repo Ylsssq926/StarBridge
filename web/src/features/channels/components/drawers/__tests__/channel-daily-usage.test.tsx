@@ -47,6 +47,7 @@ function usage(overrides: Record<string, unknown> = {}) {
       requests_used: 3,
       reject_selection_attempts_today: 6,
       retry_times: 0,
+      keys: undefined,
       ...overrides,
     },
   }
@@ -132,6 +133,9 @@ describe('ChannelDailyUsage', () => {
             daily_token_limit: 1000,
             tokens_used: 40,
             daily_request_limit: 5,
+            rpm_limit: 0,
+            cooldown_remaining_seconds: 0,
+            recoveries_today: 0,
             requests_used: 2,
           },
           {
@@ -143,6 +147,9 @@ describe('ChannelDailyUsage', () => {
             daily_token_limit: 0,
             tokens_used: 0,
             daily_request_limit: 0,
+            rpm_limit: 0,
+            cooldown_remaining_seconds: 0,
+            recoveries_today: 0,
             requests_used: 0,
           },
         ],
@@ -173,6 +180,9 @@ describe('ChannelDailyUsage', () => {
             daily_token_limit: 1000,
             tokens_used: 40,
             daily_request_limit: 5,
+            rpm_limit: 0,
+            cooldown_remaining_seconds: 0,
+            recoveries_today: 0,
             requests_used: 2,
           },
           {
@@ -184,6 +194,9 @@ describe('ChannelDailyUsage', () => {
             daily_token_limit: 0,
             tokens_used: 0,
             daily_request_limit: 0,
+            rpm_limit: 0,
+            cooldown_remaining_seconds: 0,
+            recoveries_today: 0,
             requests_used: 0,
           },
         ],
@@ -201,12 +214,15 @@ describe('ChannelDailyUsage', () => {
     const request0 = screen.getByLabelText('Daily request limit #0')
     await userEvent.clear(request0)
     await userEvent.type(request0, '9')
+    const rpm0 = screen.getByLabelText('Requests per minute limit #0')
+    await userEvent.type(rpm0, '30')
     await userEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     await vi.waitFor(() =>
       expect(mockedUpdate).toHaveBeenCalledWith(5, {
         key_daily_token_limits: {},
         key_daily_request_limits: { '0': 9 },
+        key_rpm_limits: { '0': 30 },
       })
     )
   })
@@ -226,6 +242,9 @@ describe('ChannelDailyUsage', () => {
             daily_token_limit: 1000,
             tokens_used: 40,
             daily_request_limit: 5,
+            rpm_limit: 0,
+            cooldown_remaining_seconds: 0,
+            recoveries_today: 0,
             requests_used: 2,
           },
         ],
@@ -259,6 +278,9 @@ describe('ChannelDailyUsage', () => {
             daily_token_limit: 0,
             tokens_used: 0,
             daily_request_limit: 0,
+            rpm_limit: 0,
+            cooldown_remaining_seconds: 0,
+            recoveries_today: 0,
             requests_used: 0,
           },
         ],
@@ -271,6 +293,39 @@ describe('ChannelDailyUsage', () => {
     expect(screen.getByText('Daily budget usage')).toBeInTheDocument()
     expect(
       screen.getByRole('button', { name: 'Edit per-key budgets' })
+    ).toBeInTheDocument()
+  })
+
+  it('shows the upstream cooldown and the recovery count', async () => {
+    mockedFetch.mockResolvedValue(
+      usage({
+        daily_token_limit: 0,
+        daily_request_limit: 0,
+        keys: [
+          {
+            index: 0,
+            key_tail: '***ey-a',
+            status: 1,
+            disabled_reason: '',
+            disabled_time: 0,
+            daily_token_limit: 0,
+            tokens_used: 0,
+            daily_request_limit: 0,
+            requests_used: 0,
+            rpm_limit: 60,
+            cooldown_remaining_seconds: 12,
+            recoveries_today: 2,
+          },
+        ],
+      }) as never
+    )
+    await renderUsage()
+
+    expect(
+      screen.getByText('Cooling down after upstream rate limit: 12s')
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText('Automatic recoveries today: 2')
     ).toBeInTheDocument()
   })
 

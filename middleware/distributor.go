@@ -157,6 +157,10 @@ func Distribute() func(c *gin.Context) {
 					status = http.StatusTooManyRequests
 					message = i18n.T(c, i18n.MsgDistributorChannelKeyDailyLimitExceeded, map[string]any{"Channel": channel.Id})
 				}
+				if setupErr.GetErrorCode() == types.ErrorCodeChannelKeyRateLimited {
+					status = http.StatusTooManyRequests
+					message = i18n.T(c, i18n.MsgDistributorChannelKeyRateLimited, map[string]any{"Channel": channel.Id})
+				}
 				abortWithOpenAiMessage(c, status, message, setupErr.GetErrorCode())
 				return
 			}
@@ -164,6 +168,8 @@ func Distribute() func(c *gin.Context) {
 		c.Next()
 		if channel != nil && c.Writer != nil && c.Writer.Status() < http.StatusBadRequest {
 			service.RecordChannelAffinity(c, channel.Id)
+			// Successful requests re-bind the client to the key that served it.
+			service.RecordKeyAffinity(c, channel.Id)
 		}
 	}
 }
@@ -657,7 +663,7 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 	common.SetContextKey(c, constant.ContextKeyChannelModelMapping, channel.GetModelMapping())
 	common.SetContextKey(c, constant.ContextKeyChannelStatusCodeMapping, channel.GetStatusCodeMapping())
 
-	key, index, newAPIError := service.NextKeyWithinDailyBudget(channel)
+	key, index, newAPIError := service.NextKeyWithinDailyBudget(c, channel)
 	if newAPIError != nil {
 		return newAPIError
 	}

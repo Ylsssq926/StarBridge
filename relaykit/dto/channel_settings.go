@@ -50,6 +50,11 @@ type ChannelSettings struct {
 	// budgets above still apply on top of these.
 	KeyDailyTokenLimits   map[string]int64 `json:"key_daily_token_limits,omitempty"`
 	KeyDailyRequestLimits map[string]int64 `json:"key_daily_request_limits,omitempty"`
+
+	// KeyRPMLimits caps how many requests per rolling minute one key accepts:
+	// key index -> requests per 60 seconds. Missing or zero means unlimited.
+	// This is the pacing control that keeps one account from being hammered.
+	KeyRPMLimits map[string]int64 `json:"key_rpm_limits,omitempty"`
 }
 
 // BindsTaskPlugin reports whether the channel is bound to the task plugin,

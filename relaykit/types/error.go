@@ -66,6 +66,7 @@ const (
 	ErrorCodeGroupDailyTokenLimitExceeded     ErrorCode = "group:daily_token_limit_exceeded"
 	ErrorCodeGroupDailyRequestLimitExceeded   ErrorCode = "group:daily_request_limit_exceeded"
 	ErrorCodeChannelKeyDailyLimitExceeded     ErrorCode = "channel:key_daily_limit_exceeded"
+	ErrorCodeChannelKeyRateLimited            ErrorCode = "channel:key_rate_limited"
 
 	// client request error
 	ErrorCodeReadRequestBodyFailed ErrorCode = "read_request_body_failed"

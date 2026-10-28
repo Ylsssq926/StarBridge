@@ -7385,6 +7385,9 @@
     "Edit per-key budgets": "Edit per-key budgets",
     "Per-key daily budgets saved": "Per-key daily budgets saved",
     "Failed to save per-key daily budgets": "Failed to save per-key daily budgets",
-    "Enter a whole number of at least 0, or leave the field empty for unlimited": "Enter a whole number of at least 0, or leave the field empty for unlimited"
+    "Enter a whole number of at least 0, or leave the field empty for unlimited": "Enter a whole number of at least 0, or leave the field empty for unlimited",
+    "Requests per minute limit": "Requests per minute limit",
+    "Cooling down after upstream rate limit: {{seconds}}s": "Cooling down after upstream rate limit: {{seconds}}s",
+    "Automatic recoveries today: {{count}}": "Automatic recoveries today: {{count}}"
   }
 }

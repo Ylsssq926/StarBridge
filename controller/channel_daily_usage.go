@@ -45,15 +45,18 @@ func channelDailyUsageSnapshot(channel *model.Channel) gin.H {
 			tokenLimit := setting.KeyDailyTokenLimits[key]
 			requestLimit := setting.KeyDailyRequestLimits[key]
 			rows = append(rows, gin.H{
-				"index":               index,
-				"key_tail":            maskKeyTail(keys[index]),
-				"status":              keyStatus(channel, index),
-				"disabled_reason":     keyDisabledReason(channel, index),
-				"disabled_time":       keyDisabledTime(channel, index),
-				"daily_token_limit":   tokenLimit,
-				"tokens_used":         common.GetKeyDailyTokenUsage(channel.Id, index),
-				"daily_request_limit": requestLimit,
-				"requests_used":       common.GetKeyDailyRequestUsage(channel.Id, index),
+				"index":                      index,
+				"key_tail":                   maskKeyTail(keys[index]),
+				"status":                     keyStatus(channel, index),
+				"disabled_reason":            keyDisabledReason(channel, index),
+				"disabled_time":              keyDisabledTime(channel, index),
+				"daily_token_limit":          tokenLimit,
+				"tokens_used":                common.GetKeyDailyTokenUsage(channel.Id, index),
+				"daily_request_limit":        requestLimit,
+				"requests_used":              common.GetKeyDailyRequestUsage(channel.Id, index),
+				"rpm_limit":                  setting.KeyRPMLimits[key],
+				"cooldown_remaining_seconds": common.KeyCooldownRemainingSeconds(channel.Id, index),
+				"recoveries_today":           common.GetKeyDailyRecoveryCount(channel.Id, index),
 			})
 		}
 		snapshot["keys"] = rows
@@ -158,6 +161,7 @@ func GetChannelDailyUsage(c *gin.Context) {
 type keyDailyLimitsRequest struct {
 	KeyDailyTokenLimits   map[string]int64 `json:"key_daily_token_limits"`
 	KeyDailyRequestLimits map[string]int64 `json:"key_daily_request_limits"`
+	KeyRPMLimits          map[string]int64 `json:"key_rpm_limits"`
 }
 
 // validateKeyLimitMap rejects indexes that do not exist on the channel and
@@ -213,9 +217,14 @@ func UpdateChannelKeyDailyLimits(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	if err := validateKeyLimitMap(req.KeyRPMLimits, channel.ChannelInfo.MultiKeySize); err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	setting := channel.GetSetting()
 	setting.KeyDailyTokenLimits = req.KeyDailyTokenLimits
 	setting.KeyDailyRequestLimits = req.KeyDailyRequestLimits
+	setting.KeyRPMLimits = req.KeyRPMLimits
 	if err := model.UpdateChannelSettingOnly(id, setting); err != nil {
 		common.ApiError(c, err)
 		return
@@ -224,5 +233,6 @@ func UpdateChannelKeyDailyLimits(c *gin.Context) {
 		"channel_id":               id,
 		"key_daily_token_limits":   req.KeyDailyTokenLimits,
 		"key_daily_request_limits": req.KeyDailyRequestLimits,
+		"key_rpm_limits":           req.KeyRPMLimits,
 	})
 }

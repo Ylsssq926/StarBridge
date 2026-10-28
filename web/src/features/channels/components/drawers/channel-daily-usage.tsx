@@ -47,6 +47,46 @@ function UsageRow({
   )
 }
 
+function LimitInput({
+  label,
+  ariaLabel,
+  used,
+  value,
+  onChange,
+}: {
+  label: string
+  ariaLabel: string
+  used?: number
+  value: string
+  onChange: (value: string) => void
+}) {
+  const { t } = useTranslation()
+
+  return (
+    <div className='flex items-center justify-between gap-2 text-xs'>
+      <span className='text-muted-foreground'>{label}</span>
+      <span className='flex items-center gap-1 tabular-nums'>
+        {used !== undefined ? (
+          <>
+            <span className='font-medium'>{formatNumber(used)}</span>
+            <span className='text-muted-foreground'>/</span>
+          </>
+        ) : null}
+        <Input
+          type='number'
+          min={0}
+          step={1}
+          className='h-7 w-28 text-xs'
+          aria-label={ariaLabel}
+          placeholder={t('Unlimited')}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      </span>
+    </div>
+  )
+}
+
 // Empty means "no budget"; anything else must be a non-negative whole number.
 function parseDailyLimit(raw: string): number | null {
   const trimmed = raw.trim()
@@ -55,7 +95,10 @@ function parseDailyLimit(raw: string): number | null {
   return Number.isInteger(value) && value >= 0 ? value : null
 }
 
-type KeyBudgetDraft = Record<number, { tokens: string; requests: string }>
+type KeyBudgetDraft = Record<
+  number,
+  { tokens: string; requests: string; rpm: string }
+>
 
 // Read-only view of the two per-day budgets plus how many times this channel was
 // skipped today. The numbers come from the same counters enforcement reads. The
@@ -82,6 +125,7 @@ export function ChannelDailyUsage({ channelId }: { channelId: number }) {
     mutationFn: async (payload: {
       key_daily_token_limits: Record<string, number>
       key_daily_request_limits: Record<string, number>
+      key_rpm_limits: Record<string, number>
     }) =>
       requireServerSuccess(
         await updateChannelKeyDailyLimits(channelId, payload)
@@ -139,6 +183,18 @@ export function ChannelDailyUsage({ channelId }: { channelId: number }) {
     return null
   }
 
+  const updateDraft = (
+    index: number,
+    field: 'tokens' | 'requests' | 'rpm',
+    value: string
+  ) => {
+    setDraft((current) =>
+      current
+        ? { ...current, [index]: { ...current[index], [field]: value } }
+        : current
+    )
+  }
+
   const startEditing = (keys: NonNullable<DailyUsage['keys']>) => {
     const next: KeyBudgetDraft = {}
     for (const key of keys) {
@@ -146,6 +202,7 @@ export function ChannelDailyUsage({ channelId }: { channelId: number }) {
         tokens: key.daily_token_limit > 0 ? String(key.daily_token_limit) : '',
         requests:
           key.daily_request_limit > 0 ? String(key.daily_request_limit) : '',
+        rpm: key.rpm_limit > 0 ? String(key.rpm_limit) : '',
       }
     }
     setDraft(next)
@@ -155,10 +212,12 @@ export function ChannelDailyUsage({ channelId }: { channelId: number }) {
     if (!draft) return
     const tokenLimits: Record<string, number> = {}
     const requestLimits: Record<string, number> = {}
+    const rpmLimits: Record<string, number> = {}
     for (const [index, entry] of Object.entries(draft)) {
       const tokens = parseDailyLimit(entry.tokens)
       const requests = parseDailyLimit(entry.requests)
-      if (tokens === null || requests === null) {
+      const rpm = parseDailyLimit(entry.rpm)
+      if (tokens === null || requests === null || rpm === null) {
         toast.error(
           t(
             'Enter a whole number of at least 0, or leave the field empty for unlimited'
@@ -168,10 +227,12 @@ export function ChannelDailyUsage({ channelId }: { channelId: number }) {
       }
       if (tokens > 0) tokenLimits[index] = tokens
       if (requests > 0) requestLimits[index] = requests
+      if (rpm > 0) rpmLimits[index] = rpm
     }
     saveKeyBudgets.mutate({
       key_daily_token_limits: tokenLimits,
       key_daily_request_limits: requestLimits,
+      key_rpm_limits: rpmLimits,
     })
   }
 
@@ -251,74 +312,30 @@ export function ChannelDailyUsage({ channelId }: { channelId: number }) {
                 </div>
                 {draft !== null ? (
                   <>
-                    <div className='flex items-center justify-between gap-2 text-xs'>
-                      <span className='text-muted-foreground'>
-                        {t('Tokens used today')}
-                      </span>
-                      <span className='flex items-center gap-1 tabular-nums'>
-                        <span className='font-medium'>
-                          {formatNumber(key.tokens_used)}
-                        </span>
-                        <span className='text-muted-foreground'>/</span>
-                        <Input
-                          type='number'
-                          min={0}
-                          step={1}
-                          className='h-7 w-28 text-xs'
-                          aria-label={`${t('Daily token limit')} #${key.index}`}
-                          placeholder={t('Unlimited')}
-                          value={draft[key.index]?.tokens ?? ''}
-                          onChange={(event) => {
-                            const value = event.target.value
-                            setDraft((current) =>
-                              current
-                                ? {
-                                    ...current,
-                                    [key.index]: {
-                                      ...current[key.index],
-                                      tokens: value,
-                                    },
-                                  }
-                                : current
-                            )
-                          }}
-                        />
-                      </span>
-                    </div>
-                    <div className='flex items-center justify-between gap-2 text-xs'>
-                      <span className='text-muted-foreground'>
-                        {t('Requests used today')}
-                      </span>
-                      <span className='flex items-center gap-1 tabular-nums'>
-                        <span className='font-medium'>
-                          {formatNumber(key.requests_used)}
-                        </span>
-                        <span className='text-muted-foreground'>/</span>
-                        <Input
-                          type='number'
-                          min={0}
-                          step={1}
-                          className='h-7 w-28 text-xs'
-                          aria-label={`${t('Daily request limit')} #${key.index}`}
-                          placeholder={t('Unlimited')}
-                          value={draft[key.index]?.requests ?? ''}
-                          onChange={(event) => {
-                            const value = event.target.value
-                            setDraft((current) =>
-                              current
-                                ? {
-                                    ...current,
-                                    [key.index]: {
-                                      ...current[key.index],
-                                      requests: value,
-                                    },
-                                  }
-                                : current
-                            )
-                          }}
-                        />
-                      </span>
-                    </div>
+                    <LimitInput
+                      label={t('Tokens used today')}
+                      ariaLabel={`${t('Daily token limit')} #${key.index}`}
+                      used={key.tokens_used}
+                      value={draft[key.index]?.tokens ?? ''}
+                      onChange={(value) =>
+                        updateDraft(key.index, 'tokens', value)
+                      }
+                    />
+                    <LimitInput
+                      label={t('Requests used today')}
+                      ariaLabel={`${t('Daily request limit')} #${key.index}`}
+                      used={key.requests_used}
+                      value={draft[key.index]?.requests ?? ''}
+                      onChange={(value) =>
+                        updateDraft(key.index, 'requests', value)
+                      }
+                    />
+                    <LimitInput
+                      label={t('Requests per minute limit')}
+                      ariaLabel={`${t('Requests per minute limit')} #${key.index}`}
+                      value={draft[key.index]?.rpm ?? ''}
+                      onChange={(value) => updateDraft(key.index, 'rpm', value)}
+                    />
                   </>
                 ) : (
                   <>
@@ -334,6 +351,20 @@ export function ChannelDailyUsage({ channelId }: { channelId: number }) {
                     />
                   </>
                 )}
+                {key.cooldown_remaining_seconds > 0 ? (
+                  <p className='text-xs text-amber-600'>
+                    {t('Cooling down after upstream rate limit: {{seconds}}s', {
+                      seconds: key.cooldown_remaining_seconds,
+                    })}
+                  </p>
+                ) : null}
+                {key.recoveries_today > 0 ? (
+                  <p className='text-muted-foreground text-xs'>
+                    {t('Automatic recoveries today: {{count}}', {
+                      count: key.recoveries_today,
+                    })}
+                  </p>
+                ) : null}
               </div>
             ))}
           </div>

@@ -15,6 +15,10 @@ const (
 	GroupDailyRequestUsageKeyFmt   = "group_daily_requests:%s:%s"
 	KeyDailyTokenUsageKeyFmt       = "key_daily_tokens:%s:%s"
 	KeyDailyRequestUsageKeyFmt     = "key_daily_requests:%s:%s"
+	KeyDailyRecoveryUsageKeyFmt    = "key_daily_recoveries:%s:%s"
+	KeyRPMWindowKeyFmt             = "channel_key_rpm:%d:%d:%d"
+	KeyCooldownKeyFmt              = "channel_key_cooldown:%d:%d"
+	KeyAffinityKeyFmt              = "channel_key_affinity:%d:%d:%s"
 )
 
 const (

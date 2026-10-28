@@ -795,7 +795,12 @@ func UpdateChannelStatus(channelId int, usingKey string, status int, reason stri
 			status == common.ChannelStatusManuallyDisabled && reason != ChannelStatusReasonAllKeysDisabled &&
 			channel.GetOtherInfo()["status_reason"] == ChannelStatusReasonAllKeysDisabled
 		if channel.Status == status && !overridesKeyExhaustion {
-			return false
+			// A per-key change carries state the channel status cannot express:
+			// bringing one key back inside an already-enabled channel must still
+			// be persisted, or a later cache reload disables it again.
+			if !(channel.ChannelInfo.IsMultiKey && usingKey != "") {
+				return false
+			}
 		}
 
 		if channel.ChannelInfo.IsMultiKey {

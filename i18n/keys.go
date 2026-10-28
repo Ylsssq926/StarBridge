@@ -40,6 +40,7 @@ const (
 	MsgDistributorGroupDailyTokenLimitExceeded     = "distributor.group_daily_token_limit_exceeded"
 	MsgDistributorGroupDailyRequestLimitExceeded   = "distributor.group_daily_request_limit_exceeded"
 	MsgDistributorChannelKeyDailyLimitExceeded     = "distributor.channel_key_daily_limit_exceeded"
+	MsgDistributorChannelKeyRateLimited            = "distributor.channel_key_rate_limited"
 	MsgDistributorInvalidParseModel                = "distributor.invalid_request_parse_model"
 
 	MsgQuotaUserInsufficient             = "quota.user_insufficient"

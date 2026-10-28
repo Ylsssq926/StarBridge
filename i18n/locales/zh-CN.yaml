@@ -33,6 +33,7 @@ distributor.user_daily_request_limit_exceeded: "用户 {{.User}} 已达到每日
 distributor.group_daily_token_limit_exceeded: "分组 {{.Group}} 已达到每日 Token 限额"
 distributor.group_daily_request_limit_exceeded: "分组 {{.Group}} 已达到每日请求数限额"
 distributor.channel_key_daily_limit_exceeded: "渠道 {{.Channel}} 的所有可用密钥均已达到每日限额"
+distributor.channel_key_rate_limited: "渠道 {{.Channel}} 的所有可用密钥当前都在限流中（每分钟上限或上游冷却），请稍后重试"
 distributor.invalid_request_parse_model: "无法解析模型"
 quota.user_insufficient: "用户额度不足, 剩余额度: {{.Remaining}}"
 quota.pre_consume_insufficient: "预扣费额度失败, 用户剩余额度: {{.Remaining}}, 需要预扣费额度: {{.Required}}"

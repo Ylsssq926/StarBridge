@@ -7385,6 +7385,9 @@
     "Edit per-key budgets": "キーごとの予算を編集",
     "Per-key daily budgets saved": "キーごとの日次予算を保存しました",
     "Failed to save per-key daily budgets": "キーごとの日次予算の保存に失敗しました",
-    "Enter a whole number of at least 0, or leave the field empty for unlimited": "0 以上の整数を入力してください。空欄は無制限です"
+    "Enter a whole number of at least 0, or leave the field empty for unlimited": "0 以上の整数を入力してください。空欄は無制限です",
+    "Requests per minute limit": "1分あたりのリクエスト上限",
+    "Cooling down after upstream rate limit: {{seconds}}s": "上流のレート制限によりクールダウン中：残り {{seconds}} 秒",
+    "Automatic recoveries today: {{count}}": "本日の自動復旧回数：{{count}}"
   }
 }

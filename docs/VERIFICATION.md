@@ -658,3 +658,23 @@ GitGuardian 发来说 `Ylsssq926/StarBridge` 泄露了一个 "Generic Password"�
 | 质量门 | `go build ./...`；`go test ./router/`（全包）、`./model`（Daily/FilterCandidate/TaskPlugin/Recovery）、`./service`（Settle/TaskBilling/LogTaskConsumption/Recalculate/Daily）、`./common -run Daily` 全通过；前端 `tsgo -b` 无错、vitest 7/7、oxlint 改动文件 0 错、oxfmt 改动文件格式一致（整仓 `format:check` 在本机因一个无关文件的 Windows `UNKNOWN` 读错误中断，非格式问题） |
 | 镜像 | `new-api-daily-limit:{0.10.0,local}`、`starbridge-gateway:{0.10.0,local}`，306MB；容器 `/api/status` 自报 `version: 0.10.0` |
 | 这一段不证明的事 | 任务类请求的**每把 key** 记账只做到代码与构建级验证：harness 的生图用例验证的是渠道级请求预算，没有在多 key 渠道上真实跑一次任务插件结算；前端只在 Chromium 下验证（未跑 Safari/Firefox）；每把 key 限额的并发保存没有做（整体替换语义，后写覆盖先写，与面板单管理员场景匹配） |
+
+## 33. 账号保护：每把 key 的 RPM、429 冷却、粘性与恢复上限（0.11.0，2026-10-28）
+
+用户对 kiro.rs 的评价是"反代成熟、不太封号"，要求重点参考。读它的发布记录后，真正能搬进**网关层**的是
+节奏与故障处理语义（账号级 429 冷却换号、会话粘性、自愈有间隔与上限）；客户端身份（UA/域名/每账号出口 IP/
+设备标识）在旁路容器里，网关代替不了。这一版把网关能管的部分做完，并把责任边界写进 `docs/OPERATIONS.md` §7.6。
+
+| 事项 | 结果 |
+|---|---|
+| 每把 key 的 RPM | 渠道 setting 新增 `key_rpm_limits`（按 key 索引，0=不限）。选 key 时按 60 秒窗口原子计数，打满的 key 跳过；**整池都在限流**时返回 429 `channel:key_rate_limited`，与"日预算打满"区分。Redis 用 INCR+过期（多实例共享同一窗口），无 Redis 时退回进程内滑动窗口。面板的每把 key 编辑区多了"每分钟请求上限" |
+| 上游 429 冷却 | 多 key 渠道收到上游 429 时，把**这一把 key**放进短冷却（选项 `KeyRateLimitCooldownSeconds`，默认 60，上限 600），**不写渠道禁用状态**；冷却自过期，选路自动跳过，其他 key 继续服务。冷却剩余秒数在用量接口与面板显示 |
+| 客户端粘性 | 成功请求后把 `token + 渠道 + 模型` 绑定到实际服务的 key（`KeyAffinityTTLSeconds`，默认 600，0 关闭）；下一次请求优先同一把 key，key 不可用/冷却/超预算/超 RPM 时自动回退到正常选路。绑定在**响应发出后**写入，紧接着的请求可能读不到（测试里用 700ms 等待说明这一点） |
+| 恢复上限 | 新增 `MultiKeyAutoRecoverDailyLimit`（默认 5，0 不限）：同一把 key 一天内被自动恢复到达上限后不再自动启用，留给人处理，避免"恢复→再失败→再恢复"无限循环。纯函数 `keyRecoveryAllowed` + 单表测试 |
+| 抓到的上游缺陷（真 bug） | **自动恢复只改了缓存、没落库**：渠道整体仍是启用状态时，`UpdateChannelStatus` 在"目标状态 == 当前状态"处提前返回，per-key 的恢复写不进去；下一次缓存重建又变回禁用（harness 偶发 `probe=200 badKeyStatus=3` 就是它）。修复：多 key + 指定 key 的更新即使渠道状态不变也要持久化；新增 `TestUpdateChannelStatusPersistsMultiKeyRecovery`（禁用→恢复→直接读库断言条目已删）。这个缺陷 0.9.0 就存在，只是当时断言读的是缓存 |
+| harness 隔离缺陷 | 上一轮残留的同名 auto 渠道和新渠道服务同一模型，请求被分流，状态断言读到另一个渠道。用例开始时现在删除**所有**同名渠道；顺带把 RPM 用例避开分钟边界、把异步状态改成轮询，消除偶发 |
+| 端到端（真实栈 + mock 上游） | 最终镜像连跑两次 **32/32**。新增 5 条：RPM 打满与整池 429、清空 RPM 立即恢复、上游 429 冷却且另一把 key 继续服务、冷却到期后原 key 重新可用、客户端粘性（两次请求都落在 key0） |
+| 浏览器实测 | 真实 Chrome（headless）：编辑渠道 →「其它设置」→ 每日预算用量 → 编辑每把 key 的预算 → key#0 的"每分钟请求上限"填 30 → 保存 → 直接查数据库 setting 含 `"key_rpm_limits":{"0":30}`、用量接口返回 `rpm_limit=30`、重开编辑器输入框读回 30 |
+| 质量门 | `go build ./...`；`go test ./model`（新增恢复持久化与恢复上限用例）、`./router` 全包、`./service` 定向、`./common -run Daily|Key` 全通过；`relaykit` 在 `GOWORK=off` 下独立构建通过；前端 `tsgo -b` 无错、组件测试 8/8、oxlint 改动文件 0 错 |
+| 镜像 | `new-api-daily-limit:{0.11.0,local}`、`starbridge-gateway:{0.11.0,local}`；容器 `/api/status` 自报 `version: 0.11.0` |
+| 这一段不证明的事 | 多实例下的 RPM/冷却只做了代码路径（Redis）与单实例实测，没有起第二个网关实例对打；粘性 TTL 到期、恢复上限"到顶转人工"没有端到端跑（前者靠 TTL 语义，后者靠单表测试）；冷却时长没有读取上游 `Retry-After`，是固定选项（kiro.rs 会优先采用上游值）；旁路容器的 UA/域名/出口 IP/设备标识完全没动，所以"不太封号"仍取决于旁路配置与真实账号行为，本版只保证网关侧不主动制造封号诱因（突发、重复打限流账号、账号频繁切换） |

@@ -190,6 +190,12 @@ var (
 		redisDisabled: "Redis is disabled; per-key daily request usage falls back to in-process memory and is not consistent across multiple instances",
 		failureHint:   "per-key daily limit may not take effect across instances",
 	}
+	keyDailyRecoveryMetric = dailyMetric{
+		name:          "key_recoveries",
+		keyFmt:        constant.KeyDailyRecoveryUsageKeyFmt,
+		redisDisabled: "Redis is disabled; per-key recovery counts fall back to in-process memory and are not consistent across multiple instances",
+		failureHint:   "the per-key recovery cap may not take effect across instances",
+	}
 )
 
 func keyDailySubject(channelID, keyIndex int) string {
@@ -226,4 +232,15 @@ func IncreaseKeyDailyTokenUsage(channelID, keyIndex int, tokens int64) error {
 // IncreaseKeyDailyRequestUsage records one billable request against one key.
 func IncreaseKeyDailyRequestUsage(channelID, keyIndex int) error {
 	return increaseDailyUsage(keyDailyRequestMetric, keyDailySubject(channelID, keyIndex), 1)
+}
+
+// GetKeyDailyRecoveryCount returns how many times automatic recovery has brought
+// this key back today. It bounds a key that keeps failing: without a cap the
+// cooldown/recover cycle would probe the upstream forever.
+func GetKeyDailyRecoveryCount(channelID, keyIndex int) int64 {
+	return getDailyUsage(keyDailyRecoveryMetric, keyDailySubject(channelID, keyIndex))
+}
+
+func IncreaseKeyDailyRecoveryCount(channelID, keyIndex int) error {
+	return increaseDailyUsage(keyDailyRecoveryMetric, keyDailySubject(channelID, keyIndex), 1)
 }

@@ -2,6 +2,7 @@ const http = require('node:http');
 
 let seq = 0;
 const badKeyHits = new Map();
+const rateKeyHits = new Map();
 
 function usage(model) {
   return { prompt_tokens: 5, completion_tokens: 5, total_tokens: 10 };
@@ -25,6 +26,7 @@ const server = http.createServer((req, res) => {
     // silently stops reproducing on the second run.
     if (req.method === 'POST' && req.url === '/__reset') {
       badKeyHits.clear();
+      rateKeyHits.clear();
       res.writeHead(200, headers);
       res.end(JSON.stringify({ ok: true }));
       return;
@@ -32,6 +34,17 @@ const server = http.createServer((req, res) => {
     // A revoked credential: lets the harness exercise per-key auto-disable
     // without a real upstream.
     const auth = String(req.headers.authorization || '');
+    // Account-level rate limiting: the first request on this credential is
+    // answered with 429 + Retry-After, then it behaves. Lets the harness prove
+    // that the gateway rests the key and serves from another one.
+    if (auth.includes('rate429')) {
+      rateKeyHits.set(auth, (rateKeyHits.get(auth) || 0) + 1);
+      if (rateKeyHits.get(auth) <= 1) {
+        res.writeHead(429, { ...headers, 'retry-after': '2' });
+        res.end(JSON.stringify({ error: { message: 'rate limit exceeded (mock)', type: 'rate_limit_error', code: 'rate_limit_exceeded' } }));
+        return;
+      }
+    }
     if (auth.includes('bad')) {
       // A revoked credential that "comes back": fail a limited number of times,
       // then behave. This lets the harness prove cooldown recovery deterministically

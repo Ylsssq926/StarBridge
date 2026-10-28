@@ -7385,6 +7385,9 @@
     "Edit per-key budgets": "編輯每把 key 的預算",
     "Per-key daily budgets saved": "每把 key 的每日預算已儲存",
     "Failed to save per-key daily budgets": "儲存每把 key 的每日預算失敗",
-    "Enter a whole number of at least 0, or leave the field empty for unlimited": "請輸入不小於 0 的整數，留空表示不限額"
+    "Enter a whole number of at least 0, or leave the field empty for unlimited": "請輸入不小於 0 的整數，留空表示不限額",
+    "Requests per minute limit": "每分鐘請求上限",
+    "Cooling down after upstream rate limit: {{seconds}}s": "上游限流冷卻中：剩餘 {{seconds}} 秒",
+    "Automatic recoveries today: {{count}}": "今日自動恢復 {{count}} 次"
   }
 }

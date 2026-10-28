@@ -7385,6 +7385,9 @@
     "Edit per-key budgets": "Modifier les budgets par clé",
     "Per-key daily budgets saved": "Budgets quotidiens par clé enregistrés",
     "Failed to save per-key daily budgets": "Échec de l’enregistrement des budgets quotidiens par clé",
-    "Enter a whole number of at least 0, or leave the field empty for unlimited": "Saisissez un nombre entier supérieur ou égal à 0, ou laissez vide pour illimité"
+    "Enter a whole number of at least 0, or leave the field empty for unlimited": "Saisissez un nombre entier supérieur ou égal à 0, ou laissez vide pour illimité",
+    "Requests per minute limit": "Limite de requêtes par minute",
+    "Cooling down after upstream rate limit: {{seconds}}s": "Refroidissement après limitation amont : {{seconds}} s restantes",
+    "Automatic recoveries today: {{count}}": "Récupérations automatiques aujourd’hui : {{count}}"
   }
 }

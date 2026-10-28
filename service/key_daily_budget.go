@@ -9,6 +9,8 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/types"
+
+	"github.com/gin-gonic/gin"
 )
 
 // keyDailyBudget returns the per-key limits configured for one key index. The
@@ -28,13 +30,17 @@ func keyDailyBudget(channel *model.Channel, keyIndex int) (tokenLimit, requestLi
 	return tokenLimit, requestLimit
 }
 
-// NextKeyWithinDailyBudget picks the next enabled key that still has room in its
-// own daily budgets. Single-key channels behave exactly as before.
+// NextKeyWithinDailyBudget picks the next enabled key that can serve right now:
+// inside its own daily budgets, not resting after an upstream 429, and inside its
+// per-minute request cap. Single-key channels behave exactly as before.
 //
-// When every enabled key is over budget the request fails with 429: a full
-// key pool is a "temporarily full" condition, not a misconfiguration, and the
-// code says so (channel:key_daily_limit_exceeded).
-func NextKeyWithinDailyBudget(channel *model.Channel) (string, int, *types.NewAPIError) {
+// A key that just served this client is preferred (key affinity) while it stays
+// available, so a conversation does not hop accounts between requests.
+//
+// When every enabled key is blocked the request fails with 429: a full pool is a
+// "temporarily unavailable" condition, and the code says which limit did it
+// (daily budget vs per-key pacing).
+func NextKeyWithinDailyBudget(c *gin.Context, channel *model.Channel) (string, int, *types.NewAPIError) {
 	if channel == nil || !channel.ChannelInfo.IsMultiKey {
 		return channel.GetNextEnabledKey()
 	}
@@ -45,17 +51,41 @@ func NextKeyWithinDailyBudget(channel *model.Channel) (string, int, *types.NewAP
 	if keyCount == 0 {
 		return channel.GetNextEnabledKey()
 	}
+
+	if preferred, ok := keyAffinityPreference(c, channel); ok {
+		if admitted, _ := keyAdmits(channel, preferred); admitted {
+			return channel.GetKeys()[preferred], preferred, nil
+		}
+	}
+
 	// Random mode can return the same key twice, so try twice per key before
 	// concluding the pool is exhausted.
+	sawBudgetLimit := false
+	sawRateLimited := false
 	for range keyCount * 2 {
 		key, index, apiErr := channel.GetNextEnabledKey()
 		if apiErr != nil {
 			return "", 0, apiErr
 		}
 		tokenLimit, requestLimit := keyDailyBudget(channel, index)
-		if common.IsKeyDailyBudgetAvailable(channel.Id, index, tokenLimit, requestLimit) {
+		if !common.IsKeyDailyBudgetAvailable(channel.Id, index, tokenLimit, requestLimit) {
+			sawBudgetLimit = true
+			continue
+		}
+		admitted, rateLimited := keyAdmits(channel, index)
+		if admitted {
 			return key, index, nil
 		}
+		if rateLimited {
+			sawRateLimited = true
+		}
+	}
+	if !sawBudgetLimit && sawRateLimited {
+		return "", 0, types.NewError(
+			errors.New("every enabled key is rate limited (per-key RPM or upstream cooldown)"),
+			types.ErrorCodeChannelKeyRateLimited,
+			types.ErrOptionWithStatusCode(http.StatusTooManyRequests),
+		)
 	}
 	return "", 0, types.NewError(
 		errors.New("every enabled key reached its daily budget"),

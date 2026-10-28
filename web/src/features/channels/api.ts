@@ -189,6 +189,12 @@ export interface ChannelKeyDailyUsage {
   tokens_used: number
   daily_request_limit: number
   requests_used: number
+  /** Per-minute request cap; 0 means unlimited. */
+  rpm_limit: number
+  /** Seconds this key is being skipped after an upstream 429; 0 when selectable. */
+  cooldown_remaining_seconds: number
+  /** How many times automatic recovery brought this key back today. */
+  recoveries_today: number
 }
 
 export type GetChannelDailyUsageResponse = {
@@ -208,10 +214,14 @@ export async function getChannelDailyUsage(
   return res.data
 }
 
-/** Per-key daily budgets keyed by key index. 0 or a missing entry means unlimited. */
+/**
+ * Per-key budgets and pacing keyed by key index. 0 or a missing entry means
+ * unlimited.
+ */
 export interface UpdateChannelKeyDailyLimitsRequest {
   key_daily_token_limits: Record<string, number>
   key_daily_request_limits: Record<string, number>
+  key_rpm_limits: Record<string, number>
 }
 
 /**

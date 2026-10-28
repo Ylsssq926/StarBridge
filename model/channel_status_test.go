@@ -100,3 +100,30 @@ func TestSaveStatusStateFromSingleKeySnapshotPreservesUnownedColumns(t *testing.
 	assert.Equal(t, "manual operation", otherInfo["status_reason"])
 	assert.Equal(t, float64(1234), otherInfo["status_time"])
 }
+
+func TestUpdateChannelStatusPersistsMultiKeyRecovery(t *testing.T) {
+	setupChannelStatusTest(t)
+
+	channel := Channel{
+		Name:   "multi-key-recovery",
+		Key:    "key-a\nkey-b",
+		Status: common.ChannelStatusEnabled,
+		ChannelInfo: ChannelInfo{
+			IsMultiKey:   true,
+			MultiKeySize: 2,
+			MultiKeyMode: constant.MultiKeyModePolling,
+		},
+	}
+	require.NoError(t, DB.Create(&channel).Error)
+
+	require.True(t, UpdateChannelStatus(channel.Id, "key-a", common.ChannelStatusAutoDisabled, "provider rejected key"))
+	// The channel itself stays enabled, so its status equals the recovery target;
+	// the per-key map must still be written back.
+	require.True(t, UpdateChannelStatus(channel.Id, "key-a", common.ChannelStatusEnabled, "auto recovery: cooldown elapsed"))
+
+	var stored Channel
+	require.NoError(t, DB.First(&stored, channel.Id).Error)
+	_, recorded := stored.ChannelInfo.MultiKeyStatusList[0]
+	assert.False(t, recorded, "recovered key must be removed from the disabled map in the database")
+	assert.Equal(t, common.ChannelStatusEnabled, stored.Status)
+}
