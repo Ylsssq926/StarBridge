@@ -37,6 +37,14 @@ const server = http.createServer((req, res) => {
     // Account-level rate limiting: the first request on this credential is
     // answered with 429 + Retry-After, then it behaves. Lets the harness prove
     // that the gateway rests the key and serves from another one.
+    // Capacity throttling: the model is overloaded for everyone. The gateway
+    // must not cool the credential down for this, so the harness can tell it
+    // apart from an account-level 429.
+    if (auth.includes('capacity429')) {
+      res.writeHead(429, { ...headers, 'retry-after': '2' });
+      res.end(JSON.stringify({ error: { message: 'model temporarily unavailable', type: 'overloaded_error', code: 'MODEL_TEMPORARILY_UNAVAILABLE' } }));
+      return;
+    }
     if (auth.includes('rate429')) {
       rateKeyHits.set(auth, (rateKeyHits.get(auth) || 0) + 1);
       if (rateKeyHits.get(auth) <= 1) {

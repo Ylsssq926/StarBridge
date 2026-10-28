@@ -7390,6 +7390,12 @@
     "Cooling down after upstream rate limit: {{seconds}}s": "上流のレート制限によりクールダウン中：残り {{seconds}} 秒",
     "Automatic recoveries today: {{count}}": "本日の自動復旧回数：{{count}}",
     "Key #{{index}} ({{tail}}) responded in {{seconds}}s": "キー #{{index}}（{{tail}}）が {{seconds}} 秒で応答しました",
-    "Key test failed": "キーのテストに失敗しました"
+    "Key test failed": "キーのテストに失敗しました",
+    "Quota exhausted": "クォータを使い切り",
+    "Account suspended": "アカウント停止",
+    "Credential invalid": "認証情報が無効",
+    "Account state: {{state}}": "アカウント状態：{{state}}",
+    "until {{time}}": "{{time}} まで",
+    "Failures today: {{count}}": "本日の失敗回数：{{count}}"
   }
 }

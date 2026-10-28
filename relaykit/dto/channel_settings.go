@@ -55,6 +55,21 @@ type ChannelSettings struct {
 	// key index -> requests per 60 seconds. Missing or zero means unlimited.
 	// This is the pacing control that keeps one account from being hammered.
 	KeyRPMLimits map[string]int64 `json:"key_rpm_limits,omitempty"`
+
+	// KeyExternalStates carries account state reported from outside the gateway
+	// (the sidecar that owns the accounts): key index -> state. A blocked state
+	// keeps the key out of selection until it expires or is cleared. The gateway
+	// never learns these facts on its own, so sidecars or ops push them.
+	KeyExternalStates map[string]KeyExternalState `json:"key_external_states,omitempty"`
+}
+
+// KeyExternalState is one key's externally reported account state.
+// State is "quota", "suspended" or "invalid"; until is unix seconds and 0 means
+// "until cleared by hand". Anything else is treated as normal.
+type KeyExternalState struct {
+	State  string `json:"state"`
+	Reason string `json:"reason,omitempty"`
+	Until  int64  `json:"until,omitempty"`
 }
 
 // BindsTaskPlugin reports whether the channel is bound to the task plugin,

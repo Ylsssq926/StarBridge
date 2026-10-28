@@ -694,3 +694,21 @@ GitGuardian 发来说 `Ylsssq926/StarBridge` 泄露了一个 "Generic Password"�
 | 质量门 | `go build ./...`；`router` 全包（新路由需要写进权限表，访问令牌 scope 由权限自动派生，重复声明会被 `declared twice` 测试抓住）；`service` 单测（Retry-After 解析与错误携带）；`relaykit` 独立构建；前端类型检查、组件测试 9/9、lint/格式（改动文件） |
 | 镜像 | `new-api-daily-limit:{0.12.0,local}`、`starbridge-gateway:{0.12.0,local}`；容器 `/api/status` 自报 `version: 0.12.0` |
 | 这一段不证明的事 | `Retry-After` 的 HTTP-date 形式只有单测，mock 只发秒数；探测对 embedding/图像/流式模型没有专门用例（走的是同一条 `testChannel`，但未逐一实测）；进度条只在 Chromium 下看过；冷却上限 600 秒没有端到端触发 |
+
+## 35. 旁路账号状态接入、每把 key 失败数、容量 429 不冷却（0.13.0，2026-10-28）
+
+0.11 的账号保护只依赖网关自己观察到的信号（429、401、预算）。这一版补上"账号侧的事实"：
+旁路知道某个账号额度用尽/被封禁，网关需要被告知；同时区分"账号被限流"与"模型过载"，
+并把每把 key 今天失败了几次摆到面板上。
+
+| 事项 | 结果 |
+|---|---|
+| 外部账号状态契约 | 新接口 `PUT /api/channel/:id/key_state`（`ChannelWrite`），body `{index,state,reason,until}`；`state` 支持 `quota` / `suspended` / `invalid` / `normal`（清除），`until` 是 unix 秒，**0 表示直到手工清除**。状态写进渠道 setting 的 `key_external_states`（不新增表）；选路跳过被阻塞的 key，到期自动恢复可选路（惰性判断）；整池都被阻塞时返回 `503 channel:key_unavailable`，与"限流 429 / 日预算 429"区分。`docs/OPERATIONS.md` §7.6 给了 curl 示例与"网关不轮询旁路"的理由 |
+| 面板 | 每把 key 显示外部状态（额度用尽/账号被封禁/凭据失效）、原因与到期时间；今日失败数 > 0 时显示。浏览器实测：「账号状态：额度用尽: monthly quota exhausted (直到 2026/10/29 01:33:53)」 |
+| 每把 key 失败数 | 新增日计数器 `key_daily_failures`，`ProcessChannelError` 里按实际服务的 key 累加；用量接口与面板展示。用来回答"哪把 key 在拖后腿"，不用翻日志库 |
+| 容量 429 不冷却 | 429 正文命中容量类标记（`MODEL_TEMPORARILY_UNAVAILABLE`、`overloaded`、`insufficient_model_capacity` 等）时**不冷却 key**——账号没错，是模型忙；失败数照记。初版只匹配下划线形式，mock 的 `"model temporarily unavailable"` 没命中（实测 `cooldown=1`），补上带空格短语后通过 |
+| 端到端 | 最终镜像连跑两次 **36/36**。新增 3 条：① 外部额度状态让 key0 被跳过（key0 用量 0 / key1 用量 1）；② 清除状态后 key0 重新被选中（用量 1）；③ 容量 429 后 `cooldown=0`、`failures=1`、下一次请求由另一把 key 服务 |
+| 测试自身的一个坑 | 外部状态用例第一版失败：成功请求写入了客户端粘性，第二次请求仍然回到 key1。说明"粘性优先于轮询"，用例里把 `KeyAffinityTTLSeconds` 设为 0 并写明原因 |
+| 质量门 | `go build ./...`；`router` 全包（新路由）；`service` 单测；`relaykit` 独立构建；前端类型检查、组件测试 10/10、lint/格式（改动文件） |
+| 镜像 | `new-api-daily-limit:{0.13.0,local}`、`starbridge-gateway:{0.13.0,local}`；容器 `/api/status` 自报 `version: 0.13.0` |
+| 这一段不证明的事 | **没有**随附任何旁路适配器：真实 AIClient2API/CLIProxyAPI/Kiro-Go 的账号状态怎么映射成 `quota`/`suspended`/`invalid`、什么时候推，需要按各家接口单独写（契约只定义了一次）；容量类标记是**厂商文案启发式**，遇到没覆盖的说法会退回普通 429 冷却；外部状态到期没有任何定时任务，只在下次选路/查询时生效；被外部状态阻塞时的 503 没有 `Retry-After` |

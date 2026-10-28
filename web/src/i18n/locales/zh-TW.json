@@ -7390,6 +7390,12 @@
     "Cooling down after upstream rate limit: {{seconds}}s": "上游限流冷卻中：剩餘 {{seconds}} 秒",
     "Automatic recoveries today: {{count}}": "今日自動恢復 {{count}} 次",
     "Key #{{index}} ({{tail}}) responded in {{seconds}}s": "Key #{{index}}（{{tail}}）回應耗時 {{seconds}} 秒",
-    "Key test failed": "Key 測試失敗"
+    "Key test failed": "Key 測試失敗",
+    "Quota exhausted": "額度用盡",
+    "Account suspended": "帳號被封禁",
+    "Credential invalid": "憑證失效",
+    "Account state: {{state}}": "帳號狀態：{{state}}",
+    "until {{time}}": "直到 {{time}}",
+    "Failures today: {{count}}": "今日失敗 {{count}} 次"
   }
 }

@@ -7390,6 +7390,12 @@
     "Cooling down after upstream rate limit: {{seconds}}s": "Cooling down after upstream rate limit: {{seconds}}s",
     "Automatic recoveries today: {{count}}": "Automatic recoveries today: {{count}}",
     "Key #{{index}} ({{tail}}) responded in {{seconds}}s": "Key #{{index}} ({{tail}}) responded in {{seconds}}s",
-    "Key test failed": "Key test failed"
+    "Key test failed": "Key test failed",
+    "Quota exhausted": "Quota exhausted",
+    "Account suspended": "Account suspended",
+    "Credential invalid": "Credential invalid",
+    "Account state: {{state}}": "Account state: {{state}}",
+    "until {{time}}": "until {{time}}",
+    "Failures today: {{count}}": "Failures today: {{count}}"
   }
 }

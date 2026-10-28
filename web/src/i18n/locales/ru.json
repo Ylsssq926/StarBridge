@@ -7390,6 +7390,12 @@
     "Cooling down after upstream rate limit: {{seconds}}s": "Пауза после ограничения upstream: осталось {{seconds}} с",
     "Automatic recoveries today: {{count}}": "Автоматических восстановлений сегодня: {{count}}",
     "Key #{{index}} ({{tail}}) responded in {{seconds}}s": "Ключ #{{index}} ({{tail}}) ответил за {{seconds}} с",
-    "Key test failed": "Проверка ключа не удалась"
+    "Key test failed": "Проверка ключа не удалась",
+    "Quota exhausted": "Квота исчерпана",
+    "Account suspended": "Аккаунт заблокирован",
+    "Credential invalid": "Учётные данные недействительны",
+    "Account state: {{state}}": "Состояние аккаунта: {{state}}",
+    "until {{time}}": "до {{time}}",
+    "Failures today: {{count}}": "Ошибок сегодня: {{count}}"
   }
 }

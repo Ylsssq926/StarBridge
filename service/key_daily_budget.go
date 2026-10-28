@@ -62,29 +62,44 @@ func NextKeyWithinDailyBudget(c *gin.Context, channel *model.Channel) (string, i
 	// concluding the pool is exhausted.
 	sawBudgetLimit := false
 	sawRateLimited := false
+	sawExternalBlock := false
 	for range keyCount * 2 {
 		key, index, apiErr := channel.GetNextEnabledKey()
 		if apiErr != nil {
 			return "", 0, apiErr
 		}
-		tokenLimit, requestLimit := keyDailyBudget(channel, index)
-		if !common.IsKeyDailyBudgetAvailable(channel.Id, index, tokenLimit, requestLimit) {
-			sawBudgetLimit = true
-			continue
-		}
-		admitted, rateLimited := keyAdmits(channel, index)
+		admitted, rejection := keyAdmits(channel, index)
 		if admitted {
 			return key, index, nil
 		}
-		if rateLimited {
+		switch rejection {
+		case keyRejectedBudget:
+			sawBudgetLimit = true
+		case keyRejectedPacing:
 			sawRateLimited = true
+		case keyRejectedExternal:
+			sawExternalBlock = true
 		}
 	}
-	if !sawBudgetLimit && sawRateLimited {
+	if sawBudgetLimit {
+		return "", 0, types.NewError(
+			errors.New("every enabled key reached its daily budget"),
+			types.ErrorCodeChannelKeyDailyLimitExceeded,
+			types.ErrOptionWithStatusCode(http.StatusTooManyRequests),
+		)
+	}
+	if sawRateLimited {
 		return "", 0, types.NewError(
 			errors.New("every enabled key is rate limited (per-key RPM or upstream cooldown)"),
 			types.ErrorCodeChannelKeyRateLimited,
 			types.ErrOptionWithStatusCode(http.StatusTooManyRequests),
+		)
+	}
+	if sawExternalBlock {
+		return "", 0, types.NewError(
+			errors.New("every enabled key is blocked by an external account state"),
+			types.ErrorCodeChannelKeyUnavailable,
+			types.ErrOptionWithStatusCode(http.StatusServiceUnavailable),
 		)
 	}
 	return "", 0, types.NewError(

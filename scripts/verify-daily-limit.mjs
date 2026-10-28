@@ -13,6 +13,8 @@ const MK_RPM_NAME = 'verify-multi-key-rpm';
 const MK_RATE_NAME = 'verify-multi-key-429';
 const MK_AFFINITY_NAME = 'verify-multi-key-affinity';
 const MK_PROBE_NAME = 'verify-multi-key-probe';
+const MK_STATE_NAME = 'verify-multi-key-state';
+const MK_CAPACITY_NAME = 'verify-multi-key-capacity';
 const IMAGE_MODEL = 'verify-image-model';
 const REQUEST_MODEL = 'verify-request-model';
 const RPM_MODEL = 'verify-rpm-model';
@@ -20,6 +22,8 @@ const RATE_MODEL = 'verify-rate-model';
 const AFFINITY_MODEL = 'verify-affinity-model';
 const AUTO_MODEL = 'verify-auto-model';
 const PROBE_MODEL = 'verify-probe-model';
+const STATE_MODEL = 'verify-state-model';
+const CAPACITY_MODEL = 'verify-capacity-model';
 const TOKEN_NAME = 'verify-daily-limit';
 const MODEL = 'mock-model';
 
@@ -217,7 +221,7 @@ async function main() {
     method: 'PUT',
     body: {
       key: 'ModelPrice',
-      value: JSON.stringify({ [MODEL]: 0.01, [IMAGE_MODEL]: 0.01, [REQUEST_MODEL]: 0.01, [RPM_MODEL]: 0.01, [RATE_MODEL]: 0.01, [AFFINITY_MODEL]: 0.01, [AUTO_MODEL]: 0.01, [PROBE_MODEL]: 0.01 }),
+      value: JSON.stringify({ [MODEL]: 0.01, [IMAGE_MODEL]: 0.01, [REQUEST_MODEL]: 0.01, [RPM_MODEL]: 0.01, [RATE_MODEL]: 0.01, [AFFINITY_MODEL]: 0.01, [AUTO_MODEL]: 0.01, [PROBE_MODEL]: 0.01, [STATE_MODEL]: 0.01, [CAPACITY_MODEL]: 0.01 }),
     },
   });
   record('model price configured', priced.json.success === true, 'option=ModelPrice');
@@ -613,6 +617,73 @@ async function main() {
     record('multi-key probe channel created', false, 'create failed');
   }
 
+  // Case 10e: account state pushed from outside (the sidecar owns this fact).
+  // A quota-blocked key leaves selection; clearing the state brings it back.
+  // Key affinity is off here so polling reaches key0 after it is cleared.
+  await api('/api/option/', { method: 'PUT', body: { key: 'KeyAffinityTTLSeconds', value: '0' } });
+  const stateChannel = await createMultiKeyChannel(MK_STATE_NAME, ['mock-key-a', 'mock-key-b'].join(String.fromCharCode(10)), STATE_MODEL);
+  if (stateChannel) {
+    const until = Math.floor(Date.now() / 1000) + 3600;
+    const pushed = await api(`/api/channel/${stateChannel.id}/key_state`, {
+      method: 'PUT',
+      body: { index: 0, state: 'quota', reason: 'monthly quota exhausted', until },
+    });
+    const stateReq1 = await relayChat(apiKey, STATE_MODEL);
+    await new Promise((r) => setTimeout(r, 1500));
+    const stateUsage1 = await api(`/api/channel/daily_usage/${stateChannel.id}`);
+    const stateKeys1 = stateUsage1.json?.data?.keys || [];
+    const key0State1 = stateKeys1.find((row) => row.index === 0);
+    const key1Used1 = stateKeys1.find((row) => row.index === 1)?.requests_used;
+    record(
+      'multi-key: an externally quota-blocked key is skipped',
+      pushed.json.success === true && stateReq1.status === 200 &&
+        key0State1?.external_state === 'quota' &&
+        (key0State1?.requests_used || 0) === 0 && key1Used1 === 1,
+      `req=${stateReq1.status} state=${key0State1?.external_state} used=${key0State1?.requests_used}/${key1Used1}`
+    );
+    const cleared = await api(`/api/channel/${stateChannel.id}/key_state`, {
+      method: 'PUT',
+      body: { index: 0, state: 'normal' },
+    });
+    const stateReq2 = await relayChat(apiKey, STATE_MODEL);
+    await new Promise((r) => setTimeout(r, 1500));
+    const stateUsage2 = await api(`/api/channel/daily_usage/${stateChannel.id}`);
+    const key0State2 = (stateUsage2.json?.data?.keys || []).find((row) => row.index === 0);
+    record(
+      'multi-key: clearing the external state restores the key',
+      cleared.json.success === true && stateReq2.status === 200 &&
+        (key0State2?.external_state || '') === '' &&
+        (key0State2?.requests_used || 0) === 1,
+      `req=${stateReq2.status} state=${key0State2?.external_state || '-'} used=${key0State2?.requests_used}`
+    );
+    await api(`/api/channel/${stateChannel.id}`, { method: 'DELETE' });
+  } else {
+    record('multi-key state channel created', false, 'create failed');
+  }
+
+  // Case 10f: a capacity 429 (model overloaded) must not cool the key down:
+  // the account is fine, the model is busy. The failure still counts.
+  const capacityChannel = await createMultiKeyChannel(MK_CAPACITY_NAME, ['capacity429-key', 'mock-key-b'].join(String.fromCharCode(10)), CAPACITY_MODEL);
+  if (capacityChannel) {
+    const capacity1 = await relayChat(apiKey, CAPACITY_MODEL);
+    await new Promise((r) => setTimeout(r, 500));
+    const capacityUsage = await api(`/api/channel/daily_usage/${capacityChannel.id}`);
+    const capacityKeys = capacityUsage.json?.data?.keys || [];
+    const capacityKey0 = capacityKeys.find((row) => row.index === 0);
+    const capacity2 = await relayChat(apiKey, CAPACITY_MODEL);
+    record(
+      'multi-key: a capacity 429 does not cool the key down',
+      capacity1.status === 429 &&
+        (capacityKey0?.cooldown_remaining_seconds || 0) === 0 &&
+        (capacityKey0?.failures_today || 0) >= 1 &&
+        capacity2.status === 200,
+      `first=${capacity1.status} cooldown=${capacityKey0?.cooldown_remaining_seconds} failures=${capacityKey0?.failures_today} second=${capacity2.status}`
+    );
+    await api(`/api/channel/${capacityChannel.id}`, { method: 'DELETE' });
+  } else {
+    record('multi-key capacity channel created', false, 'create failed');
+  }
+
   // The auto-disable case needs polling to reach the failing key, so affinity
   // stays off until the recovery case has run.
   await api('/api/option/', { method: 'PUT', body: { key: 'KeyAffinityTTLSeconds', value: '0' } });
@@ -735,7 +806,7 @@ async function main() {
   record('token cleaned up', afterRows.filter((t) => t?.name === TOKEN_NAME).length === 0, `left=${afterRows.length}`);
 
   for (const stray of await listChannels()) {
-    if (['price-probe', CHANNEL_NAME, IMAGE_CHANNEL_NAME, REQUEST_CHANNEL_NAME, UG_CHANNEL_NAME, MK_CHANNEL_NAME, MK_AUTO_NAME, MK_RPM_NAME, MK_RATE_NAME, MK_AFFINITY_NAME, MK_PROBE_NAME].includes(stray.name)) {
+    if (['price-probe', CHANNEL_NAME, IMAGE_CHANNEL_NAME, REQUEST_CHANNEL_NAME, UG_CHANNEL_NAME, MK_CHANNEL_NAME, MK_AUTO_NAME, MK_RPM_NAME, MK_RATE_NAME, MK_AFFINITY_NAME, MK_PROBE_NAME, MK_STATE_NAME, MK_CAPACITY_NAME].includes(stray.name)) {
       await api(`/api/channel/${stray.id}`, { method: 'DELETE' });
     }
   }

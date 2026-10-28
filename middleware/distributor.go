@@ -161,6 +161,10 @@ func Distribute() func(c *gin.Context) {
 					status = http.StatusTooManyRequests
 					message = i18n.T(c, i18n.MsgDistributorChannelKeyRateLimited, map[string]any{"Channel": channel.Id})
 				}
+				if setupErr.GetErrorCode() == types.ErrorCodeChannelKeyUnavailable {
+					status = http.StatusServiceUnavailable
+					message = i18n.T(c, i18n.MsgDistributorChannelKeyUnavailable, map[string]any{"Channel": channel.Id})
+				}
 				abortWithOpenAiMessage(c, status, message, setupErr.GetErrorCode())
 				return
 			}

@@ -44,6 +44,7 @@ func channelDailyUsageSnapshot(channel *model.Channel) gin.H {
 			key := strconv.Itoa(index)
 			tokenLimit := setting.KeyDailyTokenLimits[key]
 			requestLimit := setting.KeyDailyRequestLimits[key]
+			external := setting.KeyExternalStates[key]
 			rows = append(rows, gin.H{
 				"index":                      index,
 				"key_tail":                   maskKeyTail(keys[index]),
@@ -57,6 +58,10 @@ func channelDailyUsageSnapshot(channel *model.Channel) gin.H {
 				"rpm_limit":                  setting.KeyRPMLimits[key],
 				"cooldown_remaining_seconds": common.KeyCooldownRemainingSeconds(channel.Id, index),
 				"recoveries_today":           common.GetKeyDailyRecoveryCount(channel.Id, index),
+				"failures_today":             common.GetKeyDailyFailureCount(channel.Id, index),
+				"external_state":             external.State,
+				"external_reason":            external.Reason,
+				"external_until":             external.Until,
 			})
 		}
 		snapshot["keys"] = rows

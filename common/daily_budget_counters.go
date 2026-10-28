@@ -193,8 +193,14 @@ var (
 	keyDailyRecoveryMetric = dailyMetric{
 		name:          "key_recoveries",
 		keyFmt:        constant.KeyDailyRecoveryUsageKeyFmt,
-		redisDisabled: "Redis is disabled; per-key recovery counts fall back to in-process memory and are not consistent across multiple instances",
+		redisDisabled: "Redis is disabled; per-key recovery counts fall back to in-process memory and are not consistent across instances",
 		failureHint:   "the per-key recovery cap may not take effect across instances",
+	}
+	keyDailyFailureMetric = dailyMetric{
+		name:          "key_failures",
+		keyFmt:        constant.KeyDailyFailureUsageKeyFmt,
+		redisDisabled: "Redis is disabled; per-key failure counts fall back to in-process memory and are not consistent across instances",
+		failureHint:   "the per-key failure figure in the panel may be incomplete across instances",
 	}
 )
 
@@ -243,4 +249,14 @@ func GetKeyDailyRecoveryCount(channelID, keyIndex int) int64 {
 
 func IncreaseKeyDailyRecoveryCount(channelID, keyIndex int) error {
 	return increaseDailyUsage(keyDailyRecoveryMetric, keyDailySubject(channelID, keyIndex), 1)
+}
+
+// GetKeyDailyFailureCount returns how many upstream failures this key produced
+// today. It answers "which key is flaky" without reading the log database.
+func GetKeyDailyFailureCount(channelID, keyIndex int) int64 {
+	return getDailyUsage(keyDailyFailureMetric, keyDailySubject(channelID, keyIndex))
+}
+
+func IncreaseKeyDailyFailureCount(channelID, keyIndex int) error {
+	return increaseDailyUsage(keyDailyFailureMetric, keyDailySubject(channelID, keyIndex), 1)
 }

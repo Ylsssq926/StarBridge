@@ -7390,6 +7390,12 @@
     "Cooling down after upstream rate limit: {{seconds}}s": "Đang tạm nghỉ sau khi upstream giới hạn: còn {{seconds}} giây",
     "Automatic recoveries today: {{count}}": "Số lần tự phục hồi hôm nay: {{count}}",
     "Key #{{index}} ({{tail}}) responded in {{seconds}}s": "Key #{{index}} ({{tail}}) phản hồi trong {{seconds}} giây",
-    "Key test failed": "Kiểm tra key thất bại"
+    "Key test failed": "Kiểm tra key thất bại",
+    "Quota exhausted": "Hết hạn mức",
+    "Account suspended": "Tài khoản bị tạm ngưng",
+    "Credential invalid": "Thông tin xác thực không hợp lệ",
+    "Account state: {{state}}": "Trạng thái tài khoản: {{state}}",
+    "until {{time}}": "đến {{time}}",
+    "Failures today: {{count}}": "Số lỗi hôm nay: {{count}}"
   }
 }

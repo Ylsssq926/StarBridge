@@ -13,10 +13,10 @@
 
 ```bash
 # 在开发机（装了 Go 1.26+ / Bun 1.4+ / Docker）
-./scripts/product.sh image                                  # 产物：new-api-daily-limit:0.12.0 等 4 个 tag
-docker save new-api-daily-limit:0.12.0 -o newapi-0.12.0.tar   # 实测约 71 MB
+./scripts/product.sh image                                  # 产物：new-api-daily-limit:0.13.0 等 4 个 tag
+docker save new-api-daily-limit:0.13.0 -o newapi-0.13.0.tar   # 实测约 71 MB
 # 在服务器
-docker load -i newapi-0.12.0.tar
+docker load -i newapi-0.13.0.tar
 ```
 
 **B. 在服务器上构建**：装好 Go / Bun 后同样执行 `./scripts/product.sh image`。适合不方便传镜像的场景，
@@ -42,7 +42,7 @@ docker compose -f docker-compose.poc.yml up -d
 ```
 
 实测（全新克隆 + 随机密钥 + 全新卷）：约 60–100 秒后 `new-api-poc` 变 healthy，
-`curl http://127.0.0.1:3800/api/status` 返回 `version: 0.12.0`，
+`curl http://127.0.0.1:3800/api/status` 返回 `version: 0.13.0`，
 `curl http://127.0.0.1:3800/api/setup` 返回 `{"status":false,"root_init":false,"database_type":"postgres"}`
 ——空库、待初始化，属于正常首次状态。
 
@@ -82,7 +82,7 @@ docker exec new-api-poc-postgres pg_dump -U newapi -Fc new-api > backup-$(date +
 
 ## 7. 这一页证明了什么、没证明什么
 
-**已实测**：全新克隆 → 示例 env + 随机密钥 → healthy → 版本自报 0.12.0 → `/setup` 未初始化；
+**已实测**：全新克隆 → 示例 env + 随机密钥 → healthy → 版本自报 0.13.0 → `/setup` 未初始化；
 镜像 `docker save`/`docker load` 往返；缺少 env 时拒绝启动；runbook 里的备份命令。
 
 **未验证**（没有对应环境，别当承诺）：真实公网 TLS 反代、systemd/进程守护、多机或集群、

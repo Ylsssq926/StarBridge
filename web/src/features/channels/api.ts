@@ -195,6 +195,13 @@ export interface ChannelKeyDailyUsage {
   cooldown_remaining_seconds: number
   /** How many times automatic recovery brought this key back today. */
   recoveries_today: number
+  /** Upstream failures today, counted per key. */
+  failures_today: number
+  /** State pushed by the sidecar that owns the account; '' means normal. */
+  external_state: string
+  external_reason: string
+  /** Unix seconds when the external state expires; 0 = until cleared. */
+  external_until: number
 }
 
 export type GetChannelDailyUsageResponse = {

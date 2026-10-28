@@ -373,6 +373,43 @@ describe('ChannelDailyUsage', () => {
     await vi.waitFor(() => expect(mockedTest).toHaveBeenCalledWith(5, 0))
   })
 
+  it('shows the externally reported account state and failure count', async () => {
+    mockedFetch.mockResolvedValue(
+      usage({
+        daily_token_limit: 0,
+        daily_request_limit: 0,
+        keys: [
+          {
+            index: 0,
+            key_tail: '***ey-a',
+            status: 1,
+            disabled_reason: '',
+            disabled_time: 0,
+            daily_token_limit: 0,
+            tokens_used: 0,
+            daily_request_limit: 0,
+            requests_used: 0,
+            rpm_limit: 0,
+            cooldown_remaining_seconds: 0,
+            recoveries_today: 0,
+            failures_today: 3,
+            external_state: 'quota',
+            external_reason: 'monthly quota exhausted',
+            external_until: 0,
+          },
+        ],
+      }) as never
+    )
+    await renderUsage()
+
+    expect(
+      screen.getByText(
+        'Account state: Quota exhausted: monthly quota exhausted'
+      )
+    ).toBeInTheDocument()
+    expect(screen.getByText('Failures today: 3')).toBeInTheDocument()
+  })
+
   it('renders nothing when the channel has no budget configured', async () => {
     mockedFetch.mockResolvedValue(
       usage({ daily_token_limit: 0, daily_request_limit: 0 }) as never

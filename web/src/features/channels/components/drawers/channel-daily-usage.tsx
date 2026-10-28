@@ -7,6 +7,7 @@ import { ErrorState } from '@/components/error-state'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
+import { toIntlLocale } from '@/i18n/languages'
 import { formatNumber } from '@/lib/format'
 import { handleServerError } from '@/lib/handle-server-error'
 import { requireServerSuccess } from '@/lib/server-error-message'
@@ -128,7 +129,12 @@ type KeyBudgetDraft = Record<
 // the limits that let one exhausted key leave the pool without taking the
 // channel offline, so they belong next to the numbers they gate.
 export function ChannelDailyUsage({ channelId }: { channelId: number }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const externalStateLabel: Record<string, string> = {
+    quota: t('Quota exhausted'),
+    suspended: t('Account suspended'),
+    invalid: t('Credential invalid'),
+  }
   const queryClient = useQueryClient()
   const [draft, setDraft] = useState<KeyBudgetDraft | null>(null)
   const [testingKey, setTestingKey] = useState<number | null>(null)
@@ -417,6 +423,33 @@ export function ChannelDailyUsage({ channelId }: { channelId: number }) {
                   <p className='text-muted-foreground text-xs'>
                     {t('Automatic recoveries today: {{count}}', {
                       count: key.recoveries_today,
+                    })}
+                  </p>
+                ) : null}
+                {key.external_state &&
+                key.external_state !== 'normal' &&
+                (key.external_until === 0 ||
+                  key.external_until * 1000 > Date.now()) ? (
+                  <p className='text-destructive text-xs'>
+                    {t('Account state: {{state}}', {
+                      state:
+                        externalStateLabel[key.external_state] ??
+                        key.external_state,
+                    })}
+                    {key.external_reason ? `: ${key.external_reason}` : ''}
+                    {key.external_until > 0
+                      ? ` (${t('until {{time}}', {
+                          time: new Date(
+                            key.external_until * 1000
+                          ).toLocaleString(toIntlLocale(i18n.language)),
+                        })})`
+                      : ''}
+                  </p>
+                ) : null}
+                {key.failures_today > 0 ? (
+                  <p className='text-muted-foreground text-xs'>
+                    {t('Failures today: {{count}}', {
+                      count: key.failures_today,
                     })}
                   </p>
                 ) : null}

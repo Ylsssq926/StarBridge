@@ -3,6 +3,8 @@ package service
 import (
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -66,6 +68,30 @@ func keyAffinityTTLSeconds() int64 {
 	return int64(seconds)
 }
 
+// Capacity 429s mean the model is overloaded for everyone, not that this
+// credential misbehaved. Cooling the key would shrink the pool for an upstream
+// problem, so these markers skip the cooldown and let the next request try.
+var capacityRateLimitMarkers = []string{
+	"model_temporarily_unavailable",
+	"model temporarily unavailable",
+	"temporarily unavailable",
+	"insufficient_model_capacity",
+	"insufficient model capacity",
+	"model is overloaded",
+	"overloaded_error",
+	"overloaded",
+}
+
+func isCapacityRateLimit(err *types.NewAPIError) bool {
+	text := strings.ToLower(err.Error())
+	for _, marker := range capacityRateLimitMarkers {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 // MarkKeyRateLimited rests the key that just received an upstream 429 instead of
 // hammering it again. Only multi-key channels have a stable key index; the
 // channel status is deliberately untouched — a 429 is "slow down", not "broken".
@@ -74,6 +100,10 @@ func MarkKeyRateLimited(relayInfo *relaycommon.RelayInfo, err *types.NewAPIError
 		return
 	}
 	if err.StatusCode != http.StatusTooManyRequests {
+		return
+	}
+	if isCapacityRateLimit(err) {
+		common.SysLog(common.LogText("multi-key channel #%d: key #%d hit a capacity limit (not account throttling); no cooldown applied", relayInfo.ChannelId, relayInfo.ChannelMultiKeyIndex))
 		return
 	}
 	seconds := err.RetryAfterSeconds()
@@ -126,13 +156,37 @@ func keyAffinityPreference(c *gin.Context, channel *model.Channel) (int, bool) {
 	return common.GetKeyAffinity(tokenID, channel.Id, c.GetString("original_model"))
 }
 
-// keyAdmits reports whether one specific key may serve right now, and whether a
-// rejection was caused by pacing (cooldown / RPM) rather than budget or status.
+type keyRejection int
+
+const (
+	keyAccepted keyRejection = iota
+	keyRejectedStatus
+	keyRejectedBudget
+	keyRejectedPacing
+	keyRejectedExternal
+)
+
+// externalKeyStateBlocks reports whether an outside controller (the sidecar that
+// owns the accounts) marked this key as unavailable. Expired entries are normal
+// again without a write: until is a timestamp, not a flag.
+func externalKeyStateBlocks(channel *model.Channel, keyIndex int) bool {
+	setting := channel.GetSetting()
+	if setting.KeyExternalStates == nil {
+		return false
+	}
+	state, ok := setting.KeyExternalStates[strconv.Itoa(keyIndex)]
+	if !ok || state.State == "" || state.State == "normal" {
+		return false
+	}
+	return state.Until <= 0 || state.Until > time.Now().Unix()
+}
+
+// keyAdmits reports whether one specific key may serve right now and why not.
 // An admitted key has already consumed its RPM slot.
-func keyAdmits(channel *model.Channel, keyIndex int) (admitted bool, rateLimited bool) {
+func keyAdmits(channel *model.Channel, keyIndex int) (bool, keyRejection) {
 	keys := channel.GetKeys()
 	if keyIndex < 0 || keyIndex >= len(keys) {
-		return false, false
+		return false, keyRejectedStatus
 	}
 	status := common.ChannelStatusEnabled
 	if channel.ChannelInfo.MultiKeyStatusList != nil {
@@ -141,17 +195,34 @@ func keyAdmits(channel *model.Channel, keyIndex int) (admitted bool, rateLimited
 		}
 	}
 	if status != common.ChannelStatusEnabled {
-		return false, false
+		return false, keyRejectedStatus
+	}
+	if externalKeyStateBlocks(channel, keyIndex) {
+		return false, keyRejectedExternal
 	}
 	if common.KeyCooldownRemainingSeconds(channel.Id, keyIndex) > 0 {
-		return false, true
+		return false, keyRejectedPacing
 	}
 	tokenLimit, requestLimit := keyDailyBudget(channel, keyIndex)
 	if !common.IsKeyDailyBudgetAvailable(channel.Id, keyIndex, tokenLimit, requestLimit) {
-		return false, false
+		return false, keyRejectedBudget
 	}
 	if !common.IsKeyRPMAllowed(channel.Id, keyIndex, int(keyRPMLimit(channel, keyIndex))) {
-		return false, true
+		return false, keyRejectedPacing
 	}
-	return true, false
+	return true, keyAccepted
+}
+
+// RecordKeyFailure counts one upstream failure against the key that produced it.
+// It answers "is this credential flaky?" without querying the log database.
+func RecordKeyFailure(relayInfo *relaycommon.RelayInfo, err *types.NewAPIError) {
+	if relayInfo == nil || !relayInfo.ChannelIsMultiKey || err == nil {
+		return
+	}
+	if err.StatusCode > 0 && err.StatusCode < 400 {
+		return
+	}
+	if incErr := common.IncreaseKeyDailyFailureCount(relayInfo.ChannelId, relayInfo.ChannelMultiKeyIndex); incErr != nil {
+		common.SysError("per-key failure count not recorded: " + incErr.Error())
+	}
 }

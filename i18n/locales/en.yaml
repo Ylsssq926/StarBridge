@@ -33,6 +33,7 @@ distributor.group_daily_token_limit_exceeded: "Group {{.Group}} has reached its 
 distributor.group_daily_request_limit_exceeded: "Group {{.Group}} has reached its daily request budget"
 distributor.channel_key_daily_limit_exceeded: "Every enabled key of channel {{.Channel}} has reached its daily budget"
 distributor.channel_key_rate_limited: "Every enabled key of channel {{.Channel}} is rate limited right now (per-minute limit or upstream cooldown); retry shortly"
+distributor.channel_key_unavailable: "Every enabled key of channel {{.Channel}} is blocked by an external account state (quota, suspension or invalid credential)"
 distributor.invalid_request_parse_model: "unable to parse model"
 quota.user_insufficient: "Insufficient user quota, remaining quota: {{.Remaining}}"
 quota.pre_consume_insufficient: "Not enough quota to pre-consume for this request: {{.Remaining}} remaining, {{.Required}} required"

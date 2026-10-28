@@ -34,6 +34,7 @@ distributor.group_daily_token_limit_exceeded: "分組 {{.Group}} 已達到每日
 distributor.group_daily_request_limit_exceeded: "分組 {{.Group}} 已達到每日請求數限額"
 distributor.channel_key_daily_limit_exceeded: "管道 {{.Channel}} 的所有可用金鑰均已達到每日限額"
 distributor.channel_key_rate_limited: "管道 {{.Channel}} 的所有可用金鑰目前都在限流中（每分鐘上限或上游冷卻），請稍後重試"
+distributor.channel_key_unavailable: "管道 {{.Channel}} 的所有可用金鑰都被外部帳號狀態阻塞（額度、封禁或憑證失效）"
 distributor.invalid_request_parse_model: "無法解析模型"
 quota.user_insufficient: "使用者額度不足，剩餘額度：{{.Remaining}}"
 quota.pre_consume_insufficient: "預扣費額度失敗，使用者剩餘額度：{{.Remaining}}，需要預扣費額度：{{.Required}}"
