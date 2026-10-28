@@ -637,3 +637,24 @@ GitGuardian 发来说 `Ylsssq926/StarBridge` 泄露了一个 "Generic Password"�
 | 三个踩坑（都已记进用例注释） | ① **自动禁用是 opt-in**：`AutomaticDisableChannelEnabled` 默认 `false`，不显式打开则禁用与恢复都不会发生；② 第一版断言只看探针状态，但"永久 401 的 key 刚恢复就再次失败"是**正确行为**，改成让 mock 只失败一次，断言才对应"恢复且可用"；③ 旧 mock 进程一直占着 3999、新 mock 启动失败，导致前两次改动**根本没生效**——`netstat` 找到监听 PID 后清掉才复现出正确结果 |
 | 质量门 | `go build ./...`、`model`（含新增 `TestKeyCooldownElapsed`）/`common`/`router` 测试通过；前端未改（本版无 UI 变更） |
 | 这一段不证明的事 | 恢复只按时间判断，不看失败次数或失败类型；"每分钟扫一次"意味着全渠道停用后的恢复最多延迟约 1 分钟；旁路容器里的账号状态仍未接进来（账号池治理的第三段）；真实上游的限流/风控语义（例如 429 是否需要更长冷却）没有实测 |
+
+## 32. 每把 key 的预算可在面板里编辑（0.10.0，2026-10-28）
+
+0.8.0 给了多 key 渠道"每把 key 独立日预算 + 用量"，但限额只能写渠道 setting 的 JSON；
+0.9.0 补了自动摘除与冷却。这一版把最后一环补上：**在面板里直接改每把 key 的预算**，
+并让任务类请求（生图/视频插件）也按 key 记账。同时修掉三个只有真跑才会暴露的缺口。
+
+| 事项 | 结果 |
+|---|---|
+| 新接口 | `PUT /api/channel/:id/key_daily_limits`（`ChannelWrite`）。只对多 key 渠道生效；按 key 索引整体替换 `key_daily_token_limits` / `key_daily_request_limits`；**不存在的索引与负数直接拒绝**；留空表示该 key 不限。只写 `setting` 一列（`UpdateChannelSettingOnly`），因为处理器读渠道时不带 key，整行 `Updates` 会把 key 列表写空。缓存里的渠道同步更新，保存即时生效 |
+| 面板 | 渠道抽屉 →「其它设置」→「每日预算用量」→「密钥」区多了「编辑每把 key 的预算」：每把 key 两行（已用 / 输入框），保存后 toast 并刷新；空值或 0 表示不限，不写进 setting。7 个语言文件补齐 4 个新 key（`missing=0`，新增项 `untranslated=0`） |
+| 任务路径按 key 记账 | 任务创建时把 key 索引写进 `TaskPrivateData.ChannelKeyIndex`（仅多 key 渠道）；请求数在 `LogTaskConsumption` 记到该 key，token 在轮询结算时按同一索引累加。同步对话路径本来就走 `IncreaseKeyDailyUsage` |
+| 抓到的回归 1（上游交互） | 我为了不再吞掉选路错误，把 `SetupContextForSelectedChannel` 的返回错误改成上抛，结果 `GET /v1/videos/:task_id` 直接 500 `get_channel_failed`：**任务查询路径本来就没有渠道**（`channel == nil` 是正常态，上游一直忽略该返回值）。用 `v1.0.0-rc.47` 的临时工作树对照确认这是我们的回归后，改为"只有真的选到渠道才设置上下文"；`go test ./router/` 从 FAIL 回到 ok |
+| 抓到的回归 2（面板不可达） | 面板只在"渠道或 key 已有预算"时渲染，而设置预算的入口恰好在面板里——新渠道永远没有入口。改为"多 key 渠道只要有 key 就渲染"。组件测试从 6 条加到 7 条（新增"预算全为 0 时仍显示编辑入口"） |
+| 抓到的回归 3（缓存未命中） | 单渠道用量接口在缓存未命中时用 `selectAll=false` 回退，读不到 key 列表 → 刚创建的渠道面板空白。改为单渠道回退也带 key（只回传 `***尾4位`），列表接口保持无 key 读取 |
+| 端到端（真实栈 + mock 上游） | 最终镜像上连跑两次 harness，均为 **27/27**（清理无关格式化改动、重建镜像后再跑一次仍 27/27）。新增两条：① 越界索引与负数都被拒（`index=false negative=false`）；② 每把 key 限额经该接口写入后生效（两个 key 各 1 次请求 → `200/200/429 channel:key_daily_limit_exceeded`） |
+| 浏览器实测 | 真实 Chrome（headless）：登录 → 渠道列表切表格视图 → 编辑 `verify-ui-per-key` →「其它设置」→「每日预算用量」→ 编辑 key#0 填 500 / 3 → 保存 → toast「每把 key 的每日预算已保存」→ 重开编辑器读回 **500 / 3**；同一时刻接口返回 `daily_token_limit=500, daily_request_limit=3`。截图用完即删 |
+| harness 可重复性 | mock 的"失效一次"凭据是进程内存状态，第二次跑就不再失效 → 给 mock 加 `POST /__reset`，harness 开跑前复位（已连跑两次验证）；harness 结束时注销自己的管理员会话——此前每跑一次留一个，累计 50 个把 `AUTH_SESSION_LIMIT` 打满，下一次登录 409（另有一次连发登录触发 `CRITICAL_RATE_LIMIT` 20 次/20 分钟，429 且无 body；这是上游的预期保护，本地验证时清 `rateLimit:v2:ip:CT:*` 或等窗口） |
+| 质量门 | `go build ./...`；`go test ./router/`（全包）、`./model`（Daily/FilterCandidate/TaskPlugin/Recovery）、`./service`（Settle/TaskBilling/LogTaskConsumption/Recalculate/Daily）、`./common -run Daily` 全通过；前端 `tsgo -b` 无错、vitest 7/7、oxlint 改动文件 0 错、oxfmt 改动文件格式一致（整仓 `format:check` 在本机因一个无关文件的 Windows `UNKNOWN` 读错误中断，非格式问题） |
+| 镜像 | `new-api-daily-limit:{0.10.0,local}`、`starbridge-gateway:{0.10.0,local}`，306MB；容器 `/api/status` 自报 `version: 0.10.0` |
+| 这一段不证明的事 | 任务类请求的**每把 key** 记账只做到代码与构建级验证：harness 的生图用例验证的是渠道级请求预算，没有在多 key 渠道上真实跑一次任务插件结算；前端只在 Chromium 下验证（未跑 Safari/Firefox）；每把 key 限额的并发保存没有做（整体替换语义，后写覆盖先写，与面板单管理员场景匹配） |

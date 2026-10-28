@@ -1060,6 +1060,23 @@ func (channel *Channel) SetSetting(setting dto.ChannelSettings) {
 	channel.Setting = common.GetPointer[string](string(settingBytes))
 }
 
+// UpdateChannelSettingOnly writes just the setting column. Editors that never
+// loaded the upstream key (selectAll=false) must use this: a full Update() from
+// such a channel would persist an empty key list.
+func UpdateChannelSettingOnly(channelID int, setting dto.ChannelSettings) error {
+	payload, err := common.Marshal(setting)
+	if err != nil {
+		return err
+	}
+	if err := DB.Model(&Channel{}).Where("id = ?", channelID).Update("setting", string(payload)).Error; err != nil {
+		return err
+	}
+	if channel, err := CacheGetChannel(channelID); err == nil && channel != nil {
+		channel.SetSetting(setting)
+	}
+	return nil
+}
+
 func (channel *Channel) GetOtherSettings() dto.ChannelOtherSettings {
 	setting := dto.ChannelOtherSettings{}
 	if channel.OtherSettings != "" {

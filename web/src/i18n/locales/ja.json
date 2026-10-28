@@ -126,7 +126,7 @@
     "+{{count}} more": "他 {{count}} 件",
     "| Based on": "| に基づく",
     "0 means data is kept permanently": "0 はデータを永続的に保持することを意味します",
-    "0 means unlimited": "0は無制限を意味します",
+    "0 means unlimited": "0 は無制限を意味します",
     "1 Day": "1日",
     "1 day ago": "1日前",
     "1 hour": "1 時間",
@@ -6332,7 +6332,6 @@
     "Thinking Suffix Adapter": "思考サフィックスアダプター",
     "Thinking to Content": "思考からコンテンツへ",
     "Daily Token Limit": "1日あたりのトークン上限",
-    "0 means unlimited": "0 は無制限を意味します",
     "Maximum billable input + output tokens per channel per day. 0 means unlimited.": "チャネルごとの1日あたりの課金対象入力＋出力トークン上限。0 は無制限を意味します。",
     "Daily Request Limit": "1日あたりのリクエスト上限",
     "Maximum billable requests per channel per day. Unlike the token budget this also counts image, video and other per-call tasks that report no usage. 0 means unlimited.": "チャネルごとの1日あたりの課金対象リクエスト数の上限。トークン上限と異なり、使用量を返さない画像・動画などの従量課金タスクも計上されます。0 は無制限を意味します。",
@@ -7382,6 +7381,10 @@
     "Zhipu": "Zhipu",
     "Zhipu GLM": "Zhipu GLM",
     "Zhipu V4": "Zhipu V 4",
-    "Zoom": "ズーム"
+    "Zoom": "ズーム",
+    "Edit per-key budgets": "キーごとの予算を編集",
+    "Per-key daily budgets saved": "キーごとの日次予算を保存しました",
+    "Failed to save per-key daily budgets": "キーごとの日次予算の保存に失敗しました",
+    "Enter a whole number of at least 0, or leave the field empty for unlimited": "0 以上の整数を入力してください。空欄は無制限です"
   }
 }

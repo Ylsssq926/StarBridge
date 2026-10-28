@@ -129,6 +129,15 @@ async function findChannel() {
 }
 
 async function main() {
+  // The mock keeps "fails once" credentials in memory, so a second run against
+  // the same process would never see the failure that case 11 depends on.
+  const mockBase = process.env.MOCK_BASE || 'http://localhost:3999';
+  const mockReset = await fetch(`${mockBase}/__reset`, { method: 'POST' })
+    .then((r) => r.json())
+    .catch(() => null);
+  if (!mockReset?.ok) {
+    console.log('WARN  mock upstream reset failed; the auto-disable case may not reproduce');
+  }
   const login = await api('/api/user/login', { method: 'POST', body: { username: ADMIN_USER, password: ADMIN_PASS } });
   if (!login.json.success) {
     console.error('login failed:', JSON.stringify(login.json).slice(0, 200));
@@ -357,7 +366,9 @@ async function main() {
   // one request: the first two requests must succeed on different keys, the
   // third must fail with the key-level code (the channel itself has no budget).
   // Only the multi-key channel may serve this model, otherwise channel selection
-  // may route around it and the per-key budgets never get exercised.
+  // may route around it and the per-key budgets never get exercised. The budgets
+  // are set through the panel's own endpoint, not at creation time, so the write
+  // path admins actually use is the one under test.
   for (const stray of await listChannels()) {
     if ([REQUEST_CHANNEL_NAME, UG_CHANNEL_NAME].includes(stray.name)) {
       await api(`/api/channel/${stray.id}`, { method: 'DELETE' });
@@ -378,7 +389,6 @@ async function main() {
         priority: 0,
         weight: 0,
         status: 1,
-        setting: JSON.stringify({ key_daily_request_limits: { '0': 1, '1': 1 } }),
       },
     },
   });
@@ -389,6 +399,29 @@ async function main() {
     const mkChannel = mkItems.find((c) => c?.name === MK_CHANNEL_NAME);
     if (mkChannel) {
       await api(`/api/channel/${mkChannel.id}/status`, { method: 'PUT', body: { status: 1 } });
+      const badIndex = await api(`/api/channel/${mkChannel.id}/key_daily_limits`, {
+        method: 'PUT',
+        body: { key_daily_token_limits: {}, key_daily_request_limits: { '2': 1 } },
+      });
+      const negative = await api(`/api/channel/${mkChannel.id}/key_daily_limits`, {
+        method: 'PUT',
+        body: { key_daily_token_limits: {}, key_daily_request_limits: { '0': -1 } },
+      });
+      record(
+        'multi-key: per-key limit validation rejects unknown indexes and negative limits',
+        badIndex.json.success === false && negative.json.success === false,
+        `index=${badIndex.json.success} negative=${negative.json.success}`
+      );
+      const budgetSet = await api(`/api/channel/${mkChannel.id}/key_daily_limits`, {
+        method: 'PUT',
+        body: { key_daily_token_limits: {}, key_daily_request_limits: { '0': 1, '1': 1 } },
+      });
+      record(
+        'multi-key: per-key limits are written through the API',
+        budgetSet.json.success === true,
+        JSON.stringify(budgetSet.json).slice(0, 120)
+      );
+      await waitCache();
       const m1 = await relayChat(apiKey, REQUEST_MODEL);
       const m2 = await relayChat(apiKey, REQUEST_MODEL);
       await new Promise((r) => setTimeout(r, 2000));
@@ -524,6 +557,14 @@ async function main() {
     if (['price-probe', CHANNEL_NAME, IMAGE_CHANNEL_NAME, REQUEST_CHANNEL_NAME, UG_CHANNEL_NAME, MK_CHANNEL_NAME, MK_AUTO_NAME].includes(stray.name)) {
       await api(`/api/channel/${stray.id}`, { method: 'DELETE' });
     }
+  }
+
+  // Active sessions are capped per user (AUTH_SESSION_LIMIT). Leaving one behind
+  // per run eventually blocks the next login with a 409 that looks unrelated to
+  // this script, so revoke this run's session instead of accumulating them.
+  const logout = await api('/api/user/auth/logout', { method: 'POST' });
+  if (!logout.json?.success) {
+    console.log(`WARN  admin session not revoked — ${JSON.stringify(logout.json).slice(0, 100)}`);
   }
 
   const failed = results.filter((r) => !r.ok);

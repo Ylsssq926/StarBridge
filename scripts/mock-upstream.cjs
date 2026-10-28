@@ -20,6 +20,15 @@ const server = http.createServer((req, res) => {
       }
     })();
     const headers = { 'content-type': 'application/json' };
+    // Harness runs reuse one long-lived mock process; without a reset the
+    // "fails once" credential below stays healthy and the auto-disable case
+    // silently stops reproducing on the second run.
+    if (req.method === 'POST' && req.url === '/__reset') {
+      badKeyHits.clear();
+      res.writeHead(200, headers);
+      res.end(JSON.stringify({ ok: true }));
+      return;
+    }
     // A revoked credential: lets the harness exercise per-key auto-disable
     // without a real upstream.
     const auth = String(req.headers.authorization || '');

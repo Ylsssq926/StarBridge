@@ -723,6 +723,11 @@ func settleTaskBillingOnComplete(ctx context.Context, adaptor TaskPollingAdaptor
 			logger.LogError(ctx, common.LogText("channel daily token usage not recorded: %s", err.Error()))
 		}
 		IncreaseUserGroupDailyUsage(task.UserId, task.Group, int64(tokens), false)
+		if keyIndex := task.PrivateData.ChannelKeyIndex; keyIndex != nil {
+			if err := common.IncreaseKeyDailyTokenUsage(task.ChannelId, *keyIndex, int64(tokens)); err != nil {
+				logger.LogError(ctx, common.LogText("per-key daily token usage not recorded: %s", err.Error()))
+			}
+		}
 
 		return RecalculateTaskQuotaByTokens(ctx, task, tokens)
 	}

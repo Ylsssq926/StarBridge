@@ -6332,7 +6332,6 @@
     "Thinking Suffix Adapter": "Adaptateur de suffixe thinking",
     "Thinking to Content": "Réflexion vers Contenu",
     "Daily Token Limit": "Limite quotidienne de tokens",
-    "0 means unlimited": "0 signifie illimité",
     "Maximum billable input + output tokens per channel per day. 0 means unlimited.": "Nombre maximal de tokens facturables (entrée + sortie) par canal et par jour. 0 signifie illimité.",
     "Daily Request Limit": "Limite quotidienne de requêtes",
     "Maximum billable requests per channel per day. Unlike the token budget this also counts image, video and other per-call tasks that report no usage. 0 means unlimited.": "Nombre maximal de requêtes facturables par canal et par jour. Contrairement au budget de tokens, cela compte aussi les tâches image/vidéo facturées à la requête qui ne rapportent aucune utilisation. 0 signifie illimité.",
@@ -7382,6 +7381,10 @@
     "Zhipu": "Zhipu",
     "Zhipu GLM": "Zhipu GLM",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Edit per-key budgets": "Modifier les budgets par clé",
+    "Per-key daily budgets saved": "Budgets quotidiens par clé enregistrés",
+    "Failed to save per-key daily budgets": "Échec de l’enregistrement des budgets quotidiens par clé",
+    "Enter a whole number of at least 0, or leave the field empty for unlimited": "Saisissez un nombre entier supérieur ou égal à 0, ou laissez vide pour illimité"
   }
 }

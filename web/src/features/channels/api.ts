@@ -208,6 +208,24 @@ export async function getChannelDailyUsage(
   return res.data
 }
 
+/** Per-key daily budgets keyed by key index. 0 or a missing entry means unlimited. */
+export interface UpdateChannelKeyDailyLimitsRequest {
+  key_daily_token_limits: Record<string, number>
+  key_daily_request_limits: Record<string, number>
+}
+
+/**
+ * Replace the per-key daily budgets of a multi-key channel. The server rejects
+ * indexes the channel does not have and negative limits.
+ */
+export async function updateChannelKeyDailyLimits(
+  id: number,
+  payload: UpdateChannelKeyDailyLimitsRequest
+): Promise<{ success: boolean; message?: string }> {
+  const res = await api.put(`/api/channel/${id}/key_daily_limits`, payload)
+  return res.data
+}
+
 /**
  * Get channel operations summary for administrators
  */

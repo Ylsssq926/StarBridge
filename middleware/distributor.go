@@ -142,21 +142,24 @@ func Distribute() func(c *gin.Context) {
 			}
 		}
 		common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
-		// The key pick can fail on its own (no enabled key, or every enabled key
-		// over its per-key daily budget). Dropping that error here made a full key
-		// pool surface as a generic 500 downstream; answer with its real status.
-		if setupErr := SetupContextForSelectedChannel(c, channel, modelRequest.Model); setupErr != nil {
-			status := setupErr.StatusCode
-			if status == 0 {
-				status = http.StatusInternalServerError
+		// Task fetches legitimately reach this point with no channel; they resolve
+		// it from the stored task. Only a real selection can fail on its own key
+		// pick (no enabled key, or every key over its per-key daily budget), and
+		// dropping that error made a full key pool surface as a generic 500.
+		if channel != nil {
+			if setupErr := SetupContextForSelectedChannel(c, channel, modelRequest.Model); setupErr != nil {
+				status := setupErr.StatusCode
+				if status == 0 {
+					status = http.StatusInternalServerError
+				}
+				message := setupErr.Error()
+				if setupErr.GetErrorCode() == types.ErrorCodeChannelKeyDailyLimitExceeded {
+					status = http.StatusTooManyRequests
+					message = i18n.T(c, i18n.MsgDistributorChannelKeyDailyLimitExceeded, map[string]any{"Channel": channel.Id})
+				}
+				abortWithOpenAiMessage(c, status, message, setupErr.GetErrorCode())
+				return
 			}
-			message := setupErr.Error()
-			if setupErr.GetErrorCode() == types.ErrorCodeChannelKeyDailyLimitExceeded {
-				status = http.StatusTooManyRequests
-				message = i18n.T(c, i18n.MsgDistributorChannelKeyDailyLimitExceeded, map[string]any{"Channel": channel.Id})
-			}
-			abortWithOpenAiMessage(c, status, message, setupErr.GetErrorCode())
-			return
 		}
 		c.Next()
 		if channel != nil && c.Writer != nil && c.Writer.Status() < http.StatusBadRequest {

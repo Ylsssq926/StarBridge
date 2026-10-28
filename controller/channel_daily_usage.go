@@ -2,6 +2,7 @@ package controller
 
 import (
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -110,9 +111,11 @@ func GetChannelDailyUsage(c *gin.Context) {
 		if err != nil || channel == nil {
 			// Channel selection reads a cache that syncs on a delay, so a channel
 			// created seconds ago is legitimately missing from it. Observability
-			// must still answer for it, hence the direct DB read (selectAll=false
-			// keeps the upstream key out of memory).
-			channel, err = model.GetChannelById(id, false)
+			// must still answer for it, so read the row with its keys: the per-key
+			// rows below are built from the key list, and an empty list would hide
+			// the very panel an operator uses to set those budgets. Only tails are
+			// returned. (The list endpoint below stays keyless instead.)
+			channel, err = model.GetChannelById(id, true)
 		}
 		if err != nil {
 			common.ApiError(c, err)
@@ -150,4 +153,76 @@ func GetChannelDailyUsage(c *gin.Context) {
 		items = append(items, snapshot)
 	}
 	common.ApiSuccess(c, gin.H{"total": len(items), "channels": items})
+}
+
+type keyDailyLimitsRequest struct {
+	KeyDailyTokenLimits   map[string]int64 `json:"key_daily_token_limits"`
+	KeyDailyRequestLimits map[string]int64 `json:"key_daily_request_limits"`
+}
+
+// validateKeyLimitMap rejects indexes that do not exist on the channel and
+// negative budgets, instead of storing a limit nothing will ever read.
+func validateKeyLimitMap(limits map[string]int64, keyCount int) error {
+	for rawIndex, limit := range limits {
+		index, err := strconv.Atoi(rawIndex)
+		if err != nil || index < 0 || index >= keyCount {
+			return fmt.Errorf("key index %q is out of range (channel has %d keys)", rawIndex, keyCount)
+		}
+		if limit < 0 {
+			return fmt.Errorf("the limit for key %s must be >= 0 (0 means unlimited)", rawIndex)
+		}
+	}
+	return nil
+}
+
+// UpdateChannelKeyDailyLimits sets per-key budgets on a multi-key channel:
+// PUT /api/channel/:id/key_daily_limits.
+//
+// Only the setting column is written: this handler reads the channel without its
+// keys (selectAll=false), and a full update from such a row would persist an
+// empty key list.
+func UpdateChannelKeyDailyLimits(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		common.ApiError(c, errors.New("invalid channel id"))
+		return
+	}
+	channel, err := model.GetChannelById(id, false)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if channel == nil {
+		common.ApiError(c, errors.New("channel not found"))
+		return
+	}
+	if !channel.ChannelInfo.IsMultiKey {
+		common.ApiError(c, errors.New("per-key budgets only apply to multi-key channels"))
+		return
+	}
+	var req keyDailyLimitsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if err := validateKeyLimitMap(req.KeyDailyTokenLimits, channel.ChannelInfo.MultiKeySize); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if err := validateKeyLimitMap(req.KeyDailyRequestLimits, channel.ChannelInfo.MultiKeySize); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	setting := channel.GetSetting()
+	setting.KeyDailyTokenLimits = req.KeyDailyTokenLimits
+	setting.KeyDailyRequestLimits = req.KeyDailyRequestLimits
+	if err := model.UpdateChannelSettingOnly(id, setting); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{
+		"channel_id":               id,
+		"key_daily_token_limits":   req.KeyDailyTokenLimits,
+		"key_daily_request_limits": req.KeyDailyRequestLimits,
+	})
 }

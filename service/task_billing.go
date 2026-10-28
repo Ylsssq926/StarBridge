@@ -97,6 +97,7 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo, task *model
 		logger.LogError(c, common.LogText("channel daily request usage not recorded: %s", err.Error()))
 	}
 	IncreaseUserGroupDailyUsage(info.UserId, info.UsingGroup, 0, true)
+	IncreaseKeyDailyUsage(info, 0, true)
 
 }
 

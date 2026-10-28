@@ -18,16 +18,21 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { getChannelDailyUsage } from '../../../api'
+import { getChannelDailyUsage, updateChannelKeyDailyLimits } from '../../../api'
 import { ChannelDailyUsage } from '../channel-daily-usage'
 
 // The module id must resolve to the same file the component imports
 // (../../api from drawers/), so from drawers/__tests__/ it is ../../../api.
-vi.mock('../../../api', () => ({ getChannelDailyUsage: vi.fn() }))
+vi.mock('../../../api', () => ({
+  getChannelDailyUsage: vi.fn(),
+  updateChannelKeyDailyLimits: vi.fn(),
+}))
 
 const mockedFetch = vi.mocked(getChannelDailyUsage)
+const mockedUpdate = vi.mocked(updateChannelKeyDailyLimits)
 
 function usage(overrides: Record<string, unknown> = {}) {
   return {
@@ -48,7 +53,9 @@ function usage(overrides: Record<string, unknown> = {}) {
 }
 
 async function renderUsage() {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
   const view = render(
     <QueryClientProvider client={client}>
       <ChannelDailyUsage channelId={5} />
@@ -65,6 +72,7 @@ describe('ChannelDailyUsage', () => {
   afterEach(() => {
     cleanup()
     mockedFetch.mockReset()
+    mockedUpdate.mockReset()
   })
 
   it('shows both budgets with their usage and the skipped attempts', async () => {
@@ -74,19 +82,26 @@ describe('ChannelDailyUsage', () => {
     expect(mockedFetch).toHaveBeenCalledWith(5)
     // The value is rendered as separate text nodes ("1,234", " / ", "50,000"),
     // so assert on the row's textContent instead of a combined matcher.
-    const tokenRow = screen.getByText('Tokens today').parentElement?.textContent || ''
+    const tokenRow =
+      screen.getByText('Tokens today').parentElement?.textContent || ''
     expect(tokenRow).toContain('1,234')
     expect(tokenRow).toContain('50,000')
     const requestRow =
       screen.getByText('Requests today').parentElement?.textContent || ''
     expect(requestRow).toContain('3')
     expect(requestRow).toContain('7')
-    expect(screen.getByText('Selection attempts skipped today')).toBeInTheDocument()
+    expect(
+      screen.getByText('Selection attempts skipped today')
+    ).toBeInTheDocument()
   })
 
   it('labels an unset budget as unlimited instead of hiding it', async () => {
     mockedFetch.mockResolvedValue(
-      usage({ daily_token_limit: 0, daily_request_limit: 2, requests_used: 1 }) as never
+      usage({
+        daily_token_limit: 0,
+        daily_request_limit: 2,
+        requests_used: 1,
+      }) as never
     )
     await renderUsage()
 
@@ -143,11 +158,129 @@ describe('ChannelDailyUsage', () => {
     expect(screen.getByText('Disabled: auto: invalid key')).toBeInTheDocument()
   })
 
+  it('saves edited per-key budgets, omitting cleared limits', async () => {
+    mockedFetch.mockResolvedValue(
+      usage({
+        daily_token_limit: 0,
+        daily_request_limit: 0,
+        keys: [
+          {
+            index: 0,
+            key_tail: '***ey-a',
+            status: 1,
+            disabled_reason: '',
+            disabled_time: 0,
+            daily_token_limit: 1000,
+            tokens_used: 40,
+            daily_request_limit: 5,
+            requests_used: 2,
+          },
+          {
+            index: 1,
+            key_tail: '***ey-b',
+            status: 1,
+            disabled_reason: '',
+            disabled_time: 0,
+            daily_token_limit: 0,
+            tokens_used: 0,
+            daily_request_limit: 0,
+            requests_used: 0,
+          },
+        ],
+      }) as never
+    )
+    mockedUpdate.mockResolvedValue({ success: true } as never)
+    await renderUsage()
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Edit per-key budgets' })
+    )
+    // Clearing a field means unlimited: it must leave the stored map instead of
+    // writing 0, so the payload only carries real limits.
+    await userEvent.clear(screen.getByLabelText('Daily token limit #0'))
+    const request0 = screen.getByLabelText('Daily request limit #0')
+    await userEvent.clear(request0)
+    await userEvent.type(request0, '9')
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await vi.waitFor(() =>
+      expect(mockedUpdate).toHaveBeenCalledWith(5, {
+        key_daily_token_limits: {},
+        key_daily_request_limits: { '0': 9 },
+      })
+    )
+  })
+
+  it('refuses to save a negative per-key budget', async () => {
+    mockedFetch.mockResolvedValue(
+      usage({
+        daily_token_limit: 0,
+        daily_request_limit: 0,
+        keys: [
+          {
+            index: 0,
+            key_tail: '***ey-a',
+            status: 1,
+            disabled_reason: '',
+            disabled_time: 0,
+            daily_token_limit: 1000,
+            tokens_used: 40,
+            daily_request_limit: 5,
+            requests_used: 2,
+          },
+        ],
+      }) as never
+    )
+    await renderUsage()
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Edit per-key budgets' })
+    )
+    const token0 = screen.getByLabelText('Daily token limit #0')
+    await userEvent.clear(token0)
+    await userEvent.type(token0, '-1')
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    expect(mockedUpdate).not.toHaveBeenCalled()
+  })
+
+  it('keeps the editor reachable before any per-key budget exists', async () => {
+    mockedFetch.mockResolvedValue(
+      usage({
+        daily_token_limit: 0,
+        daily_request_limit: 0,
+        keys: [
+          {
+            index: 0,
+            key_tail: '***ey-a',
+            status: 1,
+            disabled_reason: '',
+            disabled_time: 0,
+            daily_token_limit: 0,
+            tokens_used: 0,
+            daily_request_limit: 0,
+            requests_used: 0,
+          },
+        ],
+      }) as never
+    )
+    await renderUsage()
+
+    // The panel is the only place per-key budgets can be set, so it must render
+    // for a multi-key channel even when every limit is still zero.
+    expect(screen.getByText('Daily budget usage')).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Edit per-key budgets' })
+    ).toBeInTheDocument()
+  })
+
   it('renders nothing when the channel has no budget configured', async () => {
     mockedFetch.mockResolvedValue(
       usage({ daily_token_limit: 0, daily_request_limit: 0 }) as never
     )
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
     render(
       <QueryClientProvider client={client}>
         <ChannelDailyUsage channelId={5} />

@@ -6332,7 +6332,6 @@
     "Thinking Suffix Adapter": "Адаптер суффикса thinking",
     "Thinking to Content": "Мышление в контент",
     "Daily Token Limit": "Суточный лимит токенов",
-    "0 means unlimited": "0 означает без ограничений",
     "Maximum billable input + output tokens per channel per day. 0 means unlimited.": "Максимум оплачиваемых входных и выходных токенов на канал в день. 0 означает без ограничений.",
     "Daily Request Limit": "Суточный лимит запросов",
     "Maximum billable requests per channel per day. Unlike the token budget this also counts image, video and other per-call tasks that report no usage. 0 means unlimited.": "Максимум оплачиваемых запросов на канал в день. В отличие от лимита токенов, сюда также входят задачи генерации изображений и видео с оплатой за запрос, которые не возвращают объем использования. 0 означает без ограничений.",
@@ -7382,6 +7381,10 @@
     "Zhipu": "Zhipu",
     "Zhipu GLM": "Zhipu GLM",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Edit per-key budgets": "Изменить суточные лимиты по ключам",
+    "Per-key daily budgets saved": "Суточные лимиты по ключам сохранены",
+    "Failed to save per-key daily budgets": "Не удалось сохранить суточные лимиты по ключам",
+    "Enter a whole number of at least 0, or leave the field empty for unlimited": "Введите целое число не меньше 0 или оставьте поле пустым, чтобы снять ограничение"
   }
 }

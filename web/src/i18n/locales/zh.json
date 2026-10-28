@@ -126,7 +126,7 @@
     "+{{count}} more": "还有 {{count}} 项",
     "| Based on": "| 基于",
     "0 means data is kept permanently": "0 表示永久保留数据",
-    "0 means unlimited": "0 表示不限",
+    "0 means unlimited": "0 表示不限制",
     "1 Day": "1 天",
     "1 day ago": "1 天前",
     "1 hour": "1 小时",
@@ -6332,7 +6332,6 @@
     "Thinking Suffix Adapter": "思考后缀适配器",
     "Thinking to Content": "思维到内容",
     "Daily Token Limit": "每日 Token 限额",
-    "0 means unlimited": "0 表示不限制",
     "Maximum billable input + output tokens per channel per day. 0 means unlimited.": "每个渠道每天可计费的输入 + 输出 Token 上限。0 表示不限制。",
     "Daily Request Limit": "每日请求数限额",
     "Maximum billable requests per channel per day. Unlike the token budget this also counts image, video and other per-call tasks that report no usage. 0 means unlimited.": "每个渠道每天可计费的请求数上限。与 Token 限额不同，生图、视频等不回报用量的按次任务也会计入。0 表示不限制。",
@@ -7382,6 +7381,10 @@
     "Zhipu": "智谱",
     "Zhipu GLM": "智谱GLM",
     "Zhipu V4": "智谱 V4",
-    "Zoom": "缩放"
+    "Zoom": "缩放",
+    "Edit per-key budgets": "编辑每把 key 的预算",
+    "Per-key daily budgets saved": "每把 key 的每日预算已保存",
+    "Failed to save per-key daily budgets": "保存每把 key 的每日预算失败",
+    "Enter a whole number of at least 0, or leave the field empty for unlimited": "请输入不小于 0 的整数，留空表示不限额"
   }
 }
