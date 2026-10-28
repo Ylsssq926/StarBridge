@@ -727,3 +727,15 @@ GitGuardian 发来说 `Ylsssq926/StarBridge` 泄露了一个 "Generic Password"�
 | 质量门 | `go build ./...`；`router` 全包；前一轮的 `service`/`model`/`common` 用例在 drill 的重放树上也全部跑过；本版未改前端 |
 | 镜像 | `new-api-daily-limit:{0.14.0,local}`、`starbridge-gateway:{0.14.0,local}`；容器 `/api/status` 自报 `version: 0.14.0` |
 | 这一段不证明的事 | 没有做基准测试证明"少解析 JSON"的收益（只是把每请求的解析次数从最多 18 次降到 1 次）；RPM 在无 Redis 的进程内滑动窗口下返回的是"下一分钟边界"，比实际释放时间保守；`Retry-After` 只按秒级整数测过；上游 main 的演练不代表 rc.48 发布时一定不冲突，届时仍要重跑 drill |
+
+## 37. 0.14.1 补丁：未知外部状态按正常处理（2026-10-29）
+
+自审 0.14.0 时发现的一个健壮性缺口：`key_external_states` 里只要不是空/`normal` 就当作阻塞。
+正常写入走 `PUT /key_state` 会校验枚举，但手工编辑渠道 setting 时一个拼写错误（例如 `"quata"`）
+会让这把 key **永久退出选路**（`until=0`），且没有任何提示。
+
+- 现在只有 `quota` / `suspended` / `invalid` 三个已知值会阻塞，其余（含拼写错误）按正常处理；
+  写入接口仍拒绝未知值，所以两边的口径一致：**只有明确的状态才会停用 key**。
+- 单表测试 `TestExternalKeyStateBlocks` 覆盖：无状态、normal、quota 未到期/已过期、suspended 永久、
+  invalid、未知值、其它 key 的状态不影响本 key。
+- 端到端：最终镜像连跑两次 **38/38**（比 0.14.0 多一条"接口拒绝未知状态"的检查；正常路径行为不变）。

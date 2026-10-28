@@ -677,6 +677,15 @@ async function main() {
         (key0State2?.requests_used || 0) === 1,
       `req=${stateReq2.status} state=${key0State2?.external_state || '-'} used=${key0State2?.requests_used}`
     );
+    const badState = await api(`/api/channel/${stateChannel.id}/key_state`, {
+      method: 'PUT',
+      body: { index: 0, state: 'typo' },
+    });
+    record(
+      'multi-key: the key state API rejects unknown states',
+      badState.json.success === false,
+      JSON.stringify(badState.json).slice(0, 100)
+    );
     await api(`/api/channel/${stateChannel.id}`, { method: 'DELETE' });
   } else {
     record('multi-key state channel created', false, 'create failed');

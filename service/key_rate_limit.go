@@ -171,7 +171,14 @@ func externalKeyStateBlocks(setting dto.ChannelSettings, keyIndex int) bool {
 		return false
 	}
 	state, ok := setting.KeyExternalStates[strconv.Itoa(keyIndex)]
-	if !ok || state.State == "" || state.State == "normal" {
+	if !ok {
+		return false
+	}
+	// Only known blocking states block. A typo in hand-edited settings must not
+	// park a key forever; the writer API already rejects unknown values.
+	switch state.State {
+	case "quota", "suspended", "invalid":
+	default:
 		return false
 	}
 	return state.Until <= 0 || state.Until > time.Now().Unix()

@@ -36,7 +36,7 @@ docker compose -f docker-compose.poc.yml up -d
 ```
 
 完整步骤（含"服务器上没有 Go/Bun 时怎么搬镜像"、反代与 TLS、升级回滚）见 **`docs/DEPLOY.md`**。
-镜像：`new-api-daily-limit:{0.14.0,local}`、`starbridge-gateway:{0.14.0,local}`。
+镜像：`new-api-daily-limit:{0.14.1,local}`、`starbridge-gateway:{0.14.1,local}`。
 
 ## 仓库怎么组织
 
@@ -44,7 +44,7 @@ docker compose -f docker-compose.poc.yml up -d
 |---|---|
 | `main`（默认分支） | **发布快照**：单个提交，只放能直接部署的成品，没有开发历史 |
 | 本地 `dev`（不公开） | 开发线，保留完整上游祖先链；`drill`/`export-series` 依赖它 |
-| `starbridge-0.14.0` | 最新发行 tag，指向 `main` 的唯一提交 |
+| `starbridge-0.14.1` | 最新发行 tag，指向 `main` 的唯一提交 |
 | `docs/` | `DEPLOY.md` 部署、`OPERATIONS.md` 面板与运维、`UPSTREAM_SYNC.md` 跟进上游、`VERIFICATION.md` 逐条证据、`PROVIDER_MATRIX.md` 旁路与渠道矩阵 |
 
 发布：`./scripts/publish-snapshot.sh`（把 `dev` 的树压成快照追加到 `main`）。
