@@ -147,7 +147,9 @@ async function relayModel(path, key, model, payload) {
   } catch {
     /* keep empty */
   }
-  return { status: res.status, code, body: text.slice(0, 160) };
+  const retryAfterHeader = res.headers.get('retry-after');
+  const retryAfter = retryAfterHeader ? Number(retryAfterHeader) : null;
+  return { status: res.status, code, retryAfter, body: text.slice(0, 160) };
 }
 
 async function relayChat(key, model) {
@@ -504,8 +506,9 @@ async function main() {
       'multi-key: per-key RPM skips a saturated key and refuses a full pool',
       rpmSet.json.success === true &&
         rpm1.status === 200 && rpm2.status === 200 &&
-        rpm3.status === 429 && rpm3.code === 'channel:key_rate_limited',
-      `set=${rpmSet.json.success} statuses=${rpm1.status}/${rpm2.status}/${rpm3.status} code=${rpm3.code || '-'}`
+        rpm3.status === 429 && rpm3.code === 'channel:key_rate_limited' &&
+        (rpm3.retryAfter || 0) > 0,
+      `set=${rpmSet.json.success} statuses=${rpm1.status}/${rpm2.status}/${rpm3.status} code=${rpm3.code || '-'} retry-after=${rpm3.retryAfter}`
     );
     const rpmCleared = await api(`/api/channel/${rpmChannel.id}/key_daily_limits`, {
       method: 'PUT',
@@ -549,10 +552,11 @@ async function main() {
     record(
       'multi-key: upstream 429 cools the key down and the other key serves',
       rate1.status === 429 &&
+        rate1.retryAfter === 2 &&
         (rateKey0?.cooldown_remaining_seconds || 0) > 0 &&
         (rateKey0?.cooldown_remaining_seconds || 0) <= 2 &&
         rate2.status === 200 && rateUsed1 === 1 && (rateUsed0 || 0) === 0,
-      `first=${rate1.status}/${rate1.code || '-'} cooldown=${rateKey0?.cooldown_remaining_seconds} (Retry-After=2, option=60) second=${rate2.status} used=${rateUsed0}/${rateUsed1}`
+      `first=${rate1.status}/${rate1.code || '-'} retry-after=${rate1.retryAfter} cooldown=${rateKey0?.cooldown_remaining_seconds} (option=60) second=${rate2.status} used=${rateUsed0}/${rateUsed1}`
     );
     await new Promise((r) => setTimeout(r, 3000));
     const rate3 = await relayChat(apiKey, RATE_MODEL);
@@ -641,6 +645,23 @@ async function main() {
         (key0State1?.requests_used || 0) === 0 && key1Used1 === 1,
       `req=${stateReq1.status} state=${key0State1?.external_state} used=${key0State1?.requests_used}/${key1Used1}`
     );
+    // Block the second key too: the pool is now externally exhausted, which must
+    // surface as 503 with a Retry-After pointing at the earlier expiry.
+    await api(`/api/channel/${stateChannel.id}/key_state`, {
+      method: 'PUT',
+      body: { index: 1, state: 'quota', reason: 'second key capped', until: Math.floor(Date.now() / 1000) + 120 },
+    });
+    const blocked = await relayChat(apiKey, STATE_MODEL);
+    record(
+      'multi-key: an externally blocked pool answers 503 with Retry-After',
+      blocked.status === 503 && blocked.code === 'channel:key_unavailable' &&
+        (blocked.retryAfter || 0) > 0 && (blocked.retryAfter || 0) <= 120,
+      `status=${blocked.status} code=${blocked.code || '-'} retry-after=${blocked.retryAfter}`
+    );
+    await api(`/api/channel/${stateChannel.id}/key_state`, {
+      method: 'PUT',
+      body: { index: 1, state: 'normal' },
+    });
     const cleared = await api(`/api/channel/${stateChannel.id}/key_state`, {
       method: 'PUT',
       body: { index: 0, state: 'normal' },

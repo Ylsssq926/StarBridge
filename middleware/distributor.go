@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -164,6 +165,9 @@ func Distribute() func(c *gin.Context) {
 				if setupErr.GetErrorCode() == types.ErrorCodeChannelKeyUnavailable {
 					status = http.StatusServiceUnavailable
 					message = i18n.T(c, i18n.MsgDistributorChannelKeyUnavailable, map[string]any{"Channel": channel.Id})
+				}
+				if retryAfter := setupErr.RetryAfterSeconds(); retryAfter > 0 {
+					c.Header("Retry-After", strconv.FormatInt(retryAfter, 10))
 				}
 				abortWithOpenAiMessage(c, status, message, setupErr.GetErrorCode())
 				return

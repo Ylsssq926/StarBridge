@@ -4,10 +4,12 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 
 	"github.com/gin-gonic/gin"
@@ -15,11 +17,7 @@ import (
 
 // keyDailyBudget returns the per-key limits configured for one key index. The
 // channel-wide budgets still apply on top of these; both are "per local day".
-func keyDailyBudget(channel *model.Channel, keyIndex int) (tokenLimit, requestLimit int64) {
-	if channel == nil {
-		return 0, 0
-	}
-	setting := channel.GetSetting()
+func keyDailyBudget(setting dto.ChannelSettings, keyIndex int) (tokenLimit, requestLimit int64) {
 	index := strconv.Itoa(keyIndex)
 	if setting.KeyDailyTokenLimits != nil {
 		tokenLimit = setting.KeyDailyTokenLimits[index]
@@ -51,9 +49,12 @@ func NextKeyWithinDailyBudget(c *gin.Context, channel *model.Channel) (string, i
 	if keyCount == 0 {
 		return channel.GetNextEnabledKey()
 	}
+	// Parse the setting once: each helper used to unmarshal the same JSON again,
+	// which multiplied the work by the number of candidate keys per request.
+	setting := channel.GetSetting()
 
 	if preferred, ok := keyAffinityPreference(c, channel); ok {
-		if admitted, _ := keyAdmits(channel, preferred); admitted {
+		if admitted, _ := keyAdmits(channel, setting, preferred); admitted {
 			return channel.GetKeys()[preferred], preferred, nil
 		}
 	}
@@ -63,12 +64,16 @@ func NextKeyWithinDailyBudget(c *gin.Context, channel *model.Channel) (string, i
 	sawBudgetLimit := false
 	sawRateLimited := false
 	sawExternalBlock := false
+	var minCooldown int64
+	rpmLimited := false
+	externalPermanent := false
+	var minExternalUntil int64
 	for range keyCount * 2 {
 		key, index, apiErr := channel.GetNextEnabledKey()
 		if apiErr != nil {
 			return "", 0, apiErr
 		}
-		admitted, rejection := keyAdmits(channel, index)
+		admitted, rejection := keyAdmits(channel, setting, index)
 		if admitted {
 			return key, index, nil
 		}
@@ -77,8 +82,21 @@ func NextKeyWithinDailyBudget(c *gin.Context, channel *model.Channel) (string, i
 			sawBudgetLimit = true
 		case keyRejectedPacing:
 			sawRateLimited = true
+			if remaining := common.KeyCooldownRemainingSeconds(channel.Id, index); remaining > 0 {
+				if minCooldown == 0 || remaining < minCooldown {
+					minCooldown = remaining
+				}
+			} else {
+				rpmLimited = true
+			}
 		case keyRejectedExternal:
 			sawExternalBlock = true
+			state := setting.KeyExternalStates[strconv.Itoa(index)]
+			if state.Until <= 0 {
+				externalPermanent = true
+			} else if minExternalUntil == 0 || state.Until < minExternalUntil {
+				minExternalUntil = state.Until
+			}
 		}
 	}
 	if sawBudgetLimit {
@@ -89,18 +107,32 @@ func NextKeyWithinDailyBudget(c *gin.Context, channel *model.Channel) (string, i
 		)
 	}
 	if sawRateLimited {
-		return "", 0, types.NewError(
+		rateLimitedErr := types.NewError(
 			errors.New("every enabled key is rate limited (per-key RPM or upstream cooldown)"),
 			types.ErrorCodeChannelKeyRateLimited,
 			types.ErrOptionWithStatusCode(http.StatusTooManyRequests),
 		)
+		retryAfter := minCooldown
+		if retryAfter <= 0 && rpmLimited {
+			// RPM uses a one-minute window; the next boundary frees the slot.
+			retryAfter = int64(60 - time.Now().Second())
+			if retryAfter <= 0 {
+				retryAfter = 1
+			}
+		}
+		rateLimitedErr.SetRetryAfterSeconds(retryAfter)
+		return "", 0, rateLimitedErr
 	}
 	if sawExternalBlock {
-		return "", 0, types.NewError(
+		unavailableErr := types.NewError(
 			errors.New("every enabled key is blocked by an external account state"),
 			types.ErrorCodeChannelKeyUnavailable,
 			types.ErrOptionWithStatusCode(http.StatusServiceUnavailable),
 		)
+		if !externalPermanent && minExternalUntil > time.Now().Unix() {
+			unavailableErr.SetRetryAfterSeconds(minExternalUntil - time.Now().Unix())
+		}
+		return "", 0, unavailableErr
 	}
 	return "", 0, types.NewError(
 		errors.New("every enabled key reached its daily budget"),

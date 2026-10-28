@@ -711,4 +711,19 @@ GitGuardian 发来说 `Ylsssq926/StarBridge` 泄露了一个 "Generic Password"�
 | 测试自身的一个坑 | 外部状态用例第一版失败：成功请求写入了客户端粘性，第二次请求仍然回到 key1。说明"粘性优先于轮询"，用例里把 `KeyAffinityTTLSeconds` 设为 0 并写明原因 |
 | 质量门 | `go build ./...`；`router` 全包（新路由）；`service` 单测；`relaykit` 独立构建；前端类型检查、组件测试 10/10、lint/格式（改动文件） |
 | 镜像 | `new-api-daily-limit:{0.13.0,local}`、`starbridge-gateway:{0.13.0,local}`；容器 `/api/status` 自报 `version: 0.13.0` |
-| 这一段不证明的事 | **没有**随附任何旁路适配器：真实 AIClient2API/CLIProxyAPI/Kiro-Go 的账号状态怎么映射成 `quota`/`suspended`/`invalid`、什么时候推，需要按各家接口单独写（契约只定义了一次）；容量类标记是**厂商文案启发式**，遇到没覆盖的说法会退回普通 429 冷却；外部状态到期没有任何定时任务，只在下次选路/查询时生效；被外部状态阻塞时的 503 没有 `Retry-After` |
+| 这一段不证明的事 | **没有**随附任何旁路适配器：真实 AIClient2API/CLIProxyAPI/Kiro-Go 的账号状态怎么映射成 `quota`/`suspended`/`invalid`、什么时候推，需要按各家接口单独写（契约只定义了一次）；容量类标记是**厂商文案启发式**，遇到没覆盖的说法会退回普通 429 冷却；外部状态到期没有任何定时任务，只在下次选路/查询时生效；被外部状态阻塞时的 503 当时没有 `Retry-After`（0.14.0 已补，见 §36） |
+
+## 36. 自审收口：Retry-After 补齐、选路热路径与上游 main 演练（0.14.0，2026-10-29）
+
+这一版没有新功能，是"停下来自审一遍"的结果：三个小问题 + 一次对上游 main 的完整演练。
+
+| 事项 | 结果 |
+|---|---|
+| 选路热路径 | `GetSetting()` 每次调用都会解析渠道 setting 的 JSON。选 key 时每个候选 key 会经 `keyDailyBudget`、`keyRPMLimit`、`externalKeyStateBlocks` 各解析一次，最坏 6 候选 × 3 次。现在 `NextKeyWithinDailyBudget` 只解析一次并把 `dto.ChannelSettings` 传给三个助手，签名同步调整（调用点只有选路内部） |
+| 我们自己的 429/503 带 `Retry-After` | 整池限流：取最早释放的冷却剩余；纯 RPM 打满：取下一分钟边界（1..60）；整池被外部状态阻塞：取最早到期时间，**有任何一个"直到手工清除"就不发头**。`middleware` 在写错误前设置头 |
+| 上游 429 提示透传 | 上游的 `Retry-After` 之前只用于内部冷却；现在 `controller/relay.go` 在返回错误前把它写到客户端响应头。harness 实测 mock 的 2 秒原样出现在客户端响应里 |
+| 上游 main 演练 | `./scripts/upstream-sync.sh drill upstream/main`：上游比 `v1.0.0-rc.47` 超前 **15 个提交**，重叠文件 2 个（`channel_constraint.go`、`channel_select.go`）。重放 **零冲突**，`common`/`model`/`service` 测试通过，前端 `tsgo -b` 通过，输出 `DRILL OK`。演练工作树已删除（`git worktree list` 只剩主目录）。说明补丁债没有累积；rc.48 发布时按同样流程抬基线即可 |
+| 端到端 | 最终镜像连跑两次 **37/37**。三条新增断言：RPM 整池 429 的 `retry-after=7`（下一分钟边界）、上游 429 的 `retry-after=2` 透传、外部状态整池 503 的 `retry-after=120`（最早到期） |
+| 质量门 | `go build ./...`；`router` 全包；前一轮的 `service`/`model`/`common` 用例在 drill 的重放树上也全部跑过；本版未改前端 |
+| 镜像 | `new-api-daily-limit:{0.14.0,local}`、`starbridge-gateway:{0.14.0,local}`；容器 `/api/status` 自报 `version: 0.14.0` |
+| 这一段不证明的事 | 没有做基准测试证明"少解析 JSON"的收益（只是把每请求的解析次数从最多 18 次降到 1 次）；RPM 在无 Redis 的进程内滑动窗口下返回的是"下一分钟边界"，比实际释放时间保守；`Retry-After` 只按秒级整数测过；上游 main 的演练不代表 rc.48 发布时一定不冲突，届时仍要重跑 drill |

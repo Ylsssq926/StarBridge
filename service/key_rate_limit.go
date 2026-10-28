@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 
 	"github.com/gin-gonic/gin"
@@ -41,11 +42,7 @@ func optionInt(key string, fallback int) int {
 }
 
 // keyRPMLimit returns the per-minute request cap configured for one key index.
-func keyRPMLimit(channel *model.Channel, keyIndex int) int64 {
-	if channel == nil {
-		return 0
-	}
-	setting := channel.GetSetting()
+func keyRPMLimit(setting dto.ChannelSettings, keyIndex int) int64 {
 	if setting.KeyRPMLimits == nil {
 		return 0
 	}
@@ -169,8 +166,7 @@ const (
 // externalKeyStateBlocks reports whether an outside controller (the sidecar that
 // owns the accounts) marked this key as unavailable. Expired entries are normal
 // again without a write: until is a timestamp, not a flag.
-func externalKeyStateBlocks(channel *model.Channel, keyIndex int) bool {
-	setting := channel.GetSetting()
+func externalKeyStateBlocks(setting dto.ChannelSettings, keyIndex int) bool {
 	if setting.KeyExternalStates == nil {
 		return false
 	}
@@ -183,7 +179,7 @@ func externalKeyStateBlocks(channel *model.Channel, keyIndex int) bool {
 
 // keyAdmits reports whether one specific key may serve right now and why not.
 // An admitted key has already consumed its RPM slot.
-func keyAdmits(channel *model.Channel, keyIndex int) (bool, keyRejection) {
+func keyAdmits(channel *model.Channel, setting dto.ChannelSettings, keyIndex int) (bool, keyRejection) {
 	keys := channel.GetKeys()
 	if keyIndex < 0 || keyIndex >= len(keys) {
 		return false, keyRejectedStatus
@@ -197,17 +193,17 @@ func keyAdmits(channel *model.Channel, keyIndex int) (bool, keyRejection) {
 	if status != common.ChannelStatusEnabled {
 		return false, keyRejectedStatus
 	}
-	if externalKeyStateBlocks(channel, keyIndex) {
+	if externalKeyStateBlocks(setting, keyIndex) {
 		return false, keyRejectedExternal
 	}
 	if common.KeyCooldownRemainingSeconds(channel.Id, keyIndex) > 0 {
 		return false, keyRejectedPacing
 	}
-	tokenLimit, requestLimit := keyDailyBudget(channel, keyIndex)
+	tokenLimit, requestLimit := keyDailyBudget(setting, keyIndex)
 	if !common.IsKeyDailyBudgetAvailable(channel.Id, keyIndex, tokenLimit, requestLimit) {
 		return false, keyRejectedBudget
 	}
-	if !common.IsKeyRPMAllowed(channel.Id, keyIndex, int(keyRPMLimit(channel, keyIndex))) {
+	if !common.IsKeyRPMAllowed(channel.Id, keyIndex, int(keyRPMLimit(setting, keyIndex))) {
 		return false, keyRejectedPacing
 	}
 	return true, keyAccepted
