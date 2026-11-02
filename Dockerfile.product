@@ -7,6 +7,8 @@ RUN apt-get update \
 
 WORKDIR /data
 COPY bin/new-api-linux /new-api
+# Windows checkouts / scp can drop the executable bit; the image must run it.
+RUN chmod +x /new-api
 COPY LICENSE NOTICE THIRD-PARTY-LICENSES.md /licenses/
 
 EXPOSE 3000
