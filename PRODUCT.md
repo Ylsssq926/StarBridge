@@ -1,4 +1,4 @@
-# 星桥 StarBridge · New API 国内模型网关（成品说明 v0.14.2 · 上游基线 v1.0.0-rc.47）
+# 星桥 StarBridge · New API 国内模型网关（成品说明 v0.15.0 · 上游基线 upstream/main@45746ee）
 
 ## 名称与来源
 
@@ -48,7 +48,7 @@
 | `patches/series/` | **主机制**：由分支提交生成的 patch series（`git am -3` 重放） |
 | `patches/legacy/` | pre-commit 基线的手工 file patch，仅供 `USE_SERIES=0` 回退与历史对照 |
 
-已构建镜像（按上游 `v1.0.0-rc.47` 源码）：`new-api-daily-limit:{0.14.2,local}`，别名 `starbridge-gateway:{0.14.2,local}`（含 `LICENSE`、`NOTICE`、`THIRD-PARTY-LICENSES.md`；容器 `/api/status` 自报 `version: 0.14.2`）。版本 tag 不可变：内容变化必须升 `PRODUCT_VERSION`。
+已构建镜像（按上游 `upstream/main@45746ee` 源码）：`new-api-daily-limit:{0.15.0,local}`，别名 `starbridge-gateway:{0.15.0,local}`（含 `LICENSE`、`NOTICE`、`THIRD-PARTY-LICENSES.md`；容器 `/api/status` 自报 `version: 0.15.0`）。版本 tag 不可变：内容变化必须升 `PRODUCT_VERSION`。
 
 ## 每日预算的三层（0.7.0 起）
 
@@ -146,7 +146,7 @@ docker compose -f docker-compose.poc.yml up -d
 
 ## 迭代规划
 
-详见 [docs/ITERATION_PLAN.md](docs/ITERATION_PLAN.md)。当前 v0.14.2（上游基线 `v1.0.0-rc.47`）已完成：
+详见 [docs/ITERATION_PLAN.md](docs/ITERATION_PLAN.md)。当前 v0.15.0（上游基线 `upstream/main@45746ee`）已完成：
 
 - 上游基线重建
 - 日限额后端 + 前端 + 测试（Token 预算与请求数预算两个维度，含生图/按次计费任务）
@@ -161,7 +161,8 @@ docker compose -f docker-compose.poc.yml up -d
 - 三条旁路容器验证
 - 内置阿里图片插件 mock 验证
 - compose 起停与容器网络验证
-- patch 跨 rc.46 / rc.47 / main 重放验证；跟进收敛为一条 `drill` 命令，节奏按上游 release（实测 4~5 天一个 rc）
+- patch 跨 rc.46 / rc.47 / main 重放验证；跟进收敛为一条 `drill` 命令。2026-11-03 因上游久未发 rc.48，
+  直接以 `upstream/main@45746ee` 为新基线重放 100/100（43 个上游提交，零冲突）
 - 备份恢复演练（Postgres：转储 → 旁路库恢复 → 逐表行数比对 → 用恢复库起服务探活）
 - 跨平台门禁（Linux 容器内重跑工具层与后端回归）
 

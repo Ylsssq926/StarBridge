@@ -739,3 +739,68 @@ GitGuardian 发来说 `Ylsssq926/StarBridge` 泄露了一个 "Generic Password"�
 - 单表测试 `TestExternalKeyStateBlocks` 覆盖：无状态、normal、quota 未到期/已过期、suspended 永久、
   invalid、未知值、其它 key 的状态不影响本 key。
 - 端到端：最终镜像连跑两次 **38/38**（比 0.14.0 多一条"接口拒绝未知状态"的检查；正常路径行为不变）。
+
+## 38. 0.14.2 构建修复与服务器原地升级（2026-11-03）
+
+0.14.1 在服务器部署时踩到：从 Windows `scp` 上传的二进制以 `0644` 落盘，容器启动报
+`exec: "/new-api": permission denied`。当时是手工 `chmod +x` 后构建，Dockerfile 本身没修。
+
+- 修复：`Dockerfile.product` 在 `COPY` 后 `RUN chmod +x /new-api`；0.14.2 只含这一处构建修复与版本号，
+  运行时行为与 0.14.1 相同。
+- 服务器升级实测（香港 `43.132.228.195`）：
+  1. 重新上传 0.14.2 二进制（**故意保持 0644**），用 0.14.2 的 Dockerfile 构建镜像；
+  2. `.env` 只改 `NEW_API_IMAGE`，`docker compose up -d new-api` 原地重建；
+  3. `POST /api/status` 自报 `version: 0.14.2`，容器 healthy；
+  4. `users` 行数仍为 1，`AutomaticDisableChannelEnabled=true`、`KeyRateLimitCooldownSeconds=60`
+     等策略仍在；Postgres/Redis/AIClient2API 均未重建（uptime 保持）。
+- 发布：`starbridge-0.14.2` tag/Release；快照 `main` 指向 `98902eb`。
+- **生产冒烟（2026-11-03）**：为避免改动全局选项，没有在生产实例上跑完整 harness，改为在 compose 网络里
+  起一个临时 mock 上游（`node:24-alpine`，跑 `scripts/mock-upstream.cjs`），用临时渠道与临时 token 验证：
+  1. 通过面板接口给两把 key 各设 2 次日请求上限；
+  2. 连续 5 次请求 → `200/200/200/200/429`，第 5 次错误码 `channel:key_daily_limit_exceeded`
+     （前两次粘在 key0，后两次粘在 key1，两把都打满才拒绝）；
+  3. 用量接口两把 key 各 `requests_used=2`；
+  4. 单 key 探测返回成功且耗时 > 0；
+  5. 删除临时渠道/token、删除 `smoke-model` 日志、停掉 mock 容器。
+  结果 **5/5**。清理时发现脚本用空字符串恢复 `ModelPrice` 不会清掉条目，改为写 `{}` 后复核为空；
+  该现象由冒烟脚本的恢复方式引起，不是产品缺陷。
+- 这一段不证明的事：生产冒烟只覆盖"请求/每 key 限额/用量/探测"主链路，没有覆盖 429 冷却、外部状态、
+  恢复上限（这些在本地 38 项 harness 中有覆盖）；真实账号与厂商 Key 仍未验证。
+
+## 39. 生产结项验证：重启、安全边界、备份 cron 与受控压测（2026-11-03）
+
+在 0.14.2 的生产实例（香港 `43.132.228.195`，2 vCPU / 1.9 GiB）上做最后一轮验证。所有测试都清理了
+临时渠道/token/日志；`channels=0 / 在线 token=0 / ModelPrice={}` 已复核。
+
+| 项目 | 结果 |
+|---|---|
+| Docker 守护进程重启 | `systemctl restart docker` 后 4 个容器全部自动恢复；约 33 秒后全部 healthy（健康检查间隔 30 秒，含检测延迟）。重启前建的临时渠道在 Postgres 中仍在，登录成功，版本 0.14.2 |
+| new-api 容器重启 | `docker restart new-api-poc` 后约 32 秒 healthy（同样受 30 秒健康检查间隔影响）；数据与策略保持，临时渠道可读、可删 |
+| 初始化重入 | 已初始化后再次 `POST /api/setup` 返回 `success=false`（`The system is already initialized`）；管理员登录仍然正常 |
+| 未认证访问 | `/api/user/self`、`/api/channel/` 未带凭据均返回 401 |
+| 端口暴露 | 仅 `127.0.0.1:3800`（网关）与 `127.0.0.1:3100`（旁路 UI）；无 2375/2376，Postgres/Redis 端口未发布到宿主 |
+| 文件权限 | `.env`、管理员凭据文件 600；`backups/` 700；目录下世界可读的只有 compose、env 示例和 nginx 模板，无密钥 |
+| 备份 cron | 手工按 cron 的完整命令执行成功（pg_dump + 旁路配置 tar）；构造两个 20 天前的假备份后执行保留策略，两个都被删除，真实备份保留 |
+| 受控压测 | compose 网络内临时 mock 上游，单渠道单 key，**200 请求 / 并发 20**：全部 200，耗时 1.04s，约 **192 rps**，p50 **85ms**，p95 **219ms**，max 440ms；`requests_used=201`（含 1 次预热）。压测后 new-api 62MiB / Postgres 83MiB / 旁路 50MiB / Redis 4MiB，系统可用约 1.0GiB |
+| 收尾 | 临时容器、渠道、token、`load-model`/`smoke-model` 日志、`ModelPrice` 条目全部清理；nginx 配置哈希未变，PM2 仍是 auth/writing-pro/resume/course 四个服务 |
+| 这一段不证明的事 | 压测的“上游”是本地 mock，数字只代表网关开销，不代表真实上游延迟；没有做长时间 soak/内存泄漏观察；没有真机重启（只重启了 Docker 与容器）；健康检查间隔 30 秒使“healthy 时间”偏保守；真实账号/厂商 Key 仍未接入 |
+
+部署侧新增：`docker-compose.server.yml` 给 new-api 加了 `host.docker.internal:host-gateway`，
+便于以后渠道访问宿主上的本地服务；该改动已重建 new-api 验证 healthy。
+
+## 40. 跟进 upstream/main（43 个新提交）与 0.15.0（2026-11-03）
+
+`v1.0.0-rc.47` 之后上游一直没发新 rc，但 `upstream/main` 已累积 **43 个提交**，包含我们关心的
+任务插件、Gemini Omni 计费、HTTP/2 健康检查、日志轮转、DOMPurify 安全升级等；依赖也有升级。
+按“该跟的可以跟”的要求，这次不再等 rc，直接以 main 为新基线。
+
+| 事项 | 结果 |
+|---|---|
+| 重放方式 | 在临时分支 `tmp-rebase` 上 `git rebase --onto upstream/main v1.0.0-rc.47 dev`，先把生成的 `patches/series` 移到仓库外（未跟踪产物会挡住历史提交） |
+| 冲突 | **零冲突，100/100 个自有提交重放成功**。`upstream-sync.sh status`：Behind upstream 0、Custom commits 100、overlap 0 |
+| 基线 | `UPSTREAM_BASE=45746eee4de25ab1eb75d4b7fbb8de2199483ea3`（2026-11-03 的 main HEAD；因无新 rc，固定到具体 commit，而不是移动的 `upstream/main`） |
+| 依赖 | 上游带入 go.mod/relaykit 5 行与前端 lock 238 行更新（DOMPurify 等）；前端重新 `bun install --frozen-lockfile` + 类型检查通过 |
+| 门禁 | `go build ./...`；`router` / `model` / `service` 定向测试；前端 `tsgo -b`（1,414 文件）、渠道测试 **378/378**、生产构建；镜像 `new-api-daily-limit:0.15.0` |
+| 端到端 | 本地栈 harness 连跑两次 **38/38**（上游合并后行为未回归） |
+| 版本 | 0.15.0（基线升级按规则进位）；README/PRODUCT/DEPLOY/OPERATIONS 同步 |
+| 这一段不证明的事 | 没有跑 `go test ./...` 全量（只跑定向）；上游带来的 Gemini Omni/任务插件新功能没有真实账号/Key 实测；生产服务器升级与冒烟在发布后单独做 |
