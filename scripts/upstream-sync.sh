@@ -141,7 +141,7 @@ patch_files() {
 # This line is the ONLY place the baseline ref is written down: CI and the
 # operations snippets read it via `upstream-sync.sh base`. Switching base =
 # change this one line and replay the series onto the new tag.
-UPSTREAM_BASE="${UPSTREAM_BASE:-45746eee4de25ab1eb75d4b7fbb8de2199483ea3}"
+UPSTREAM_BASE="${UPSTREAM_BASE:-b388140acfd80369ec6243b16869daff1b4051f4}"
 SERIES_DIR="${SERIES_DIR:-$PATCH_DIR/series}"
 
 series_change_files() {

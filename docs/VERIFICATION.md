@@ -804,3 +804,22 @@ GitGuardian 发来说 `Ylsssq926/StarBridge` 泄露了一个 "Generic Password"�
 | 端到端 | 本地栈 harness 连跑两次 **38/38**（上游合并后行为未回归） |
 | 版本 | 0.15.0（基线升级按规则进位）；README/PRODUCT/DEPLOY/OPERATIONS 同步 |
 | 这一段不证明的事 | 没有跑 `go test ./...` 全量（只跑定向）；上游带来的 Gemini Omni/任务插件新功能没有真实账号/Key 实测；生产服务器升级与冒烟在发布后单独做 |
+| 生产升级与冒烟 | 服务器已原地升级到 0.15.0（只重建 new-api，PG/Redis/旁路未动），数据/策略/登录保持；临时 mock 渠道冒烟 **5/5**（2+2 限额、4×200 后 429、用量 2/2、探测成功），清理后 `channels=0 / tokens=0 / ModelPrice={}` |
+
+## 41. 跟进上游 rc.48–rc.51（38 个新提交）与 0.16.0（2026-11-14）
+
+上游发了 rc.48/49/50/51，`upstream/main` 超前旧基线 `45746ee` **38 个提交**（main 仅比 rc.51 多 2 个：
+doubao-seedream 模型 + 插件文档）。重点改动：provider/request 插件与社区市场、moego 升到 alpha.3
+（修复无 AVX 的 x86-64 SIGILL）、模型价格保存前审核与问题告警、Redis 跨槽/鉴权缓存完整性修复、
+易支付 RSA 签名、HOST 监听地址 env、多 key 渠道恢复与手动禁用保留。按“该更新的更新该适配的适配”跟进到 main。
+
+| 事项 | 结果 |
+|---|---|
+| 重放方式 | `upstream-sync.sh drill upstream/main`：从 `45746ee..HEAD` 导出 102 个补丁，在 `../new-api-upstream-main` 用 `git am -3` 重放到 `b388140ac` |
+| 重叠面 | overlap 37 个文件（双方都改）；真冲突 5 处，其余三方自动合并 |
+| 冲突与解法 | ① `model/channel_constraint.go`：上游 `relayChannel \|\| pluginChannel` 新逻辑 + 我方 `FilterDailyTokenLimit` case 取并集；② `relaykit/dto/channel_settings.go`：上游 `RequestPlugins` + 我方 `DailyTokenLimit` 字段并存；③ `web/.../channel-actions.ts`：上游 `pluginCredentials` + 我方 `dailyUsage` query key 并存；④ `model/task.go`：上游 TaskPlugin 凭据账号块 + 我方多 key 索引块并存；⑤ `model/channel.go`：上游把 `UpdateChannelStatus` 重构成 `UpdateChannelOtherInfo` 回调（返回 `(map[string]any, error)`），我方每 key 持久化守卫的 `return false` 适配为 `return nil, nil`。7 个 i18n locale 末尾 key 取并集（脚本合并 + JSON 校验） |
+| 基线 | `UPSTREAM_BASE=b388140acfd80369ec6243b16869daff1b4051f4`（2026-11-14 的 main HEAD） |
+| 后端门禁 | `go build ./...`、`relaykit`/`tokenkit` 各自 `GOWORK=off go build ./...` 全 0；`common -run Daily`、`model -run 'Daily\|FilterCandidate\|TaskPlugin'`、`model` channel_status（我方持久化测试 + 上游手动禁用/bump 测试共存）、`service` 计费回归全 ok |
+| 前端门禁 | `bun install --frozen-lockfile` + `bun run build` + `bun run typecheck`（**1,498 文件无类型错误**）；渠道单测 **41 文件 / 458 测试全过**（含上游插件市场/登录插件新测试与我方日预算测试） |
+| 版本 | 0.16.0（基线升级进位）；PRODUCT/README/DEPLOY/ITERATION_PLAN/OPERATIONS 基线与版本同步 |
+| 这一段不证明的事 | 没有跑 `go test ./...` 全量（只跑定向）；上游插件市场/moego alpha.3/价格审核没有真实账号/Key 实测；端到端 harness 与生产升级冒烟在发布后单独做 |
