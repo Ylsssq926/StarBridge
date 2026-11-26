@@ -14,7 +14,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/textproto"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -36,6 +35,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/setting/request_plugin_setting"
 
+	"github.com/MoeForge/moego/regexp"
 	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -175,6 +175,7 @@ func (h *relayHarness) install(t *testing.T, channel *model.Channel) *model.Chan
 	t.Helper()
 	require.NoError(t, model.DB.Where("1 = 1").Delete(&model.Ability{}).Error)
 	require.NoError(t, model.DB.Where("1 = 1").Delete(&model.Channel{}).Error)
+	model.InitChannelCache()
 	channel.Id = 0
 	require.NoError(t, channel.Insert())
 	model.InitChannelCache()
@@ -597,7 +598,19 @@ func TestFailedRefreshBeforeTheRequest(t *testing.T) {
 // another key.
 func TestNeedsLoginCredentialFailsWithoutReachingTheUpstream(t *testing.T) {
 	previousAutoDisable, previousRetry := common.AutomaticDisableChannelEnabled, common.RetryTimes
-	t.Cleanup(func() { common.AutomaticDisableChannelEnabled, common.RetryTimes = previousAutoDisable, previousRetry })
+	previousAffinity, hadAffinity := common.OptionMap[service.KeyAffinityTTLOptionKey]
+	if common.OptionMap == nil {
+		common.OptionMap = make(map[string]string)
+	}
+	common.OptionMap[service.KeyAffinityTTLOptionKey] = "0"
+	t.Cleanup(func() {
+		common.AutomaticDisableChannelEnabled, common.RetryTimes = previousAutoDisable, previousRetry
+		if hadAffinity {
+			common.OptionMap[service.KeyAffinityTTLOptionKey] = previousAffinity
+		} else {
+			delete(common.OptionMap, service.KeyAffinityTTLOptionKey)
+		}
+	})
 	for _, autoDisable := range []bool{true, false} {
 		t.Run(fmt.Sprintf("auto-disable %v", autoDisable), func(t *testing.T) {
 			common.AutomaticDisableChannelEnabled = autoDisable

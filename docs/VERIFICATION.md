@@ -822,4 +822,69 @@ doubao-seedream 模型 + 插件文档）。重点改动：provider/request 插�
 | 后端门禁 | `go build ./...`、`relaykit`/`tokenkit` 各自 `GOWORK=off go build ./...` 全 0；`common -run Daily`、`model -run 'Daily\|FilterCandidate\|TaskPlugin'`、`model` channel_status（我方持久化测试 + 上游手动禁用/bump 测试共存）、`service` 计费回归全 ok |
 | 前端门禁 | `bun install --frozen-lockfile` + `bun run build` + `bun run typecheck`（**1,498 文件无类型错误**）；渠道单测 **41 文件 / 458 测试全过**（含上游插件市场/登录插件新测试与我方日预算测试） |
 | 版本 | 0.16.0（基线升级进位）；PRODUCT/README/DEPLOY/ITERATION_PLAN/OPERATIONS 基线与版本同步 |
-| 这一段不证明的事 | 没有跑 `go test ./...` 全量（只跑定向）；上游插件市场/moego alpha.3/价格审核没有真实账号/Key 实测；端到端 harness 与生产升级冒烟在发布后单独做 |
+| 镜像 | `scripts/build-image.sh` 三段全 0（前端 install/build、`CGO_ENABLED=0 GOOS=linux` 静态二进制 142MB）；`Dockerfile.product` 打四 tag（`new-api-daily-limit:{local,0.16.0}` + `starbridge-gateway:{local,0.16.0}`，315MB），容器内 `/new-api --version` 自报 `0.16.0` |
+| 发布 | `publish-snapshot.sh`：dev 树压成快照 `main=11cf494eb`（父 `ea3270bdb`=0.15.0，fast-forward 不强推），tag `starbridge-0.16.0` 推送 starbridge；**未碰 origin/upstream** |
+| CI | Product Gates run `43584528871`（push main 触发）：`frontend success` / `backend success` / `sync-integrity skipped`（main 快照线按设计跳过），整体 success |
+| 生产升级 | HK `43.132.228.195` 原地升级：先取即时备份 `backups/pre-upgrade-0.16.0-20261114-182133.sql.gz`（49KB，gzip 有效，76 条 CREATE/COPY=38 表）；`docker save`→scp→`docker load`；`.env` 仅改 `NEW_API_IMAGE`（备份 `.env.pre-0.16.0`）；`up -d new-api` 只重建网关，约 35s healthy，`/api/status` 自报 `0.16.0`，`/api/setup status:true`（数据保留、不可重入）。PG/Redis/旁路 uptime 未变（2 周/11 天），未动 PM2/nginx/SSH |
+| 生产冒烟 | 宿主 node v20 跑 `mock-upstream.cjs`（3999，`host.docker.internal` 可达），临时双 key 渠道 + 临时 token：登录保留、2+2 限额写入、`200/200/200/200/429 channel:key_daily_limit_exceeded`、用量 `2/2`、单 key 探测 `time=0.041s` 均 PASS。脚本自身 6/7（末条 ModelPrice 恢复比对因 GET 表示差异假阴性）；**独立 DB 核查**确认 `ModelPrice={}`（无 smoke 条目）、`channels=0 / tokens=0 / smoke 日志=0`、mock 已停。临时脚本已清理 |
+| 回滚资产 | 保留 `new-api-daily-limit:0.15.0` 镜像、`.env.pre-0.16.0`、即时 DB 备份；回滚=改回 `NEW_API_IMAGE` + `up -d new-api`（不带 `-v`） |
+| 这一段不证明的事 | 没有跑 `go test ./...` 全量（只跑定向）；上游插件市场/moego alpha.3/价格审核没有真实账号/Key 实测；生产冒烟只覆盖请求/每 key 限额/用量/探测主链路，未覆盖 429 冷却/外部状态/恢复上限（本地 harness 有覆盖）；真实账号与厂商 Key 仍未验证 |
+
+## 42. 跟进最新 upstream/main（29 个新提交）与 0.17.0（2026-11-25）
+
+旧基线 `b388140ac` 之后，`upstream/main` 新增 **29 个提交、136 个文件**（`+6344/−1383`）。
+本轮固定到 `6627f0e3f37c002564b630a73e5afb0d28a92d3b`，重放 **103/103** 个自有提交；上游缓存、
+插件市场与请求插件行为保留，StarBridge 的渠道/用户/分组日预算、每 key 预算/RPM/冷却/亲和、
+有界自动恢复和外部 key 状态契约保留。七语言 locale 冲突按 key 取并集，校验结果为
+`LOCALE_KEYS_OK 7834 keys x 7`。
+
+| 事项 | 实际命令与结果 |
+|---|---|
+| 重放与基线 | `upstream-sync.sh drill upstream/main` 导出 103 个补丁，在 `../new-api-upstream-main` 用 `git am -3` 重放；`git merge-base --is-ancestor 6627f0e3 HEAD` 通过，`base..HEAD` 为 103 个提交。同步脚本的 `UPSTREAM_BASE` 已抬到完整 SHA |
+| 独立模块 | `relaykit/` 与 `tokenkit/` 分别执行 `GOWORK=off go build ./...`、`GOWORK=off go test ./... -count=1`，全部通过 |
+| 后端全量回归 | 用三组覆盖 `go list ./...` 的全部包：① `GOMAXPROCS=2 go test -p 1 ./ ./common/... ./constant ./dto ./e2e ./i18n ./logger ./middleware ./oauth ./pkg/... ./plugins ./setting/... ./types -count=1 -timeout=8m`；② 同参数跑 `./controller ./model ./router ./service/...`；③ 同参数跑 `./relay/...`。三组全部通过，不是只跑定向用例 |
+| 最终后端复验 | 审查后又跑 `GOMAXPROCS=2 go test -p 1 ./logger ./middleware ./service ./model -count=1 -timeout=8m`，全部通过；根模块、`relaykit`、`tokenkit` 的 `go build ./...` 全部通过 |
+| 前端全量测试 | `bun run test --maxWorkers=1`：**237 个文件 / 2915 项全部通过**（1468.97s）。串行是为规避全量 Go 测试争用时的 worker 启动超时，不是跳过用例 |
+| 前端类型与构建 | `bun run typecheck`：**1,505 个文件无类型错误**；`bun run build`：Rsbuild 2.2.0 构建成功并生成 `web/dist/index.html` |
+| 真实三库矩阵 | SQLite **3.50.4**、MySQL **8.4.13**、PostgreSQL **16.15**。`TEST_MYSQL_DSN` / `TEST_POSTGRES_DSN` 指向本轮自建、只绑 127.0.0.1 的容器；`GOMAXPROCS=2 go test -p 1 ./model -run '^(TestBatchSetChannelTagDatabaseMatrix|TestUnfinishedTaskQueriesDatabaseMatrix|TestTaskPrivateDataPersistsChannelIdentity)$' -count=1 -v` 三库均实际执行，无 skip，`ok ... 47.698s` |
+| 持久化复验 | 审查后把任务私有数据测试改为随机表前缀 + 可丢弃库名守卫，在新建的 `starbridge_task_private_test` 库上重跑同一测试：SQLite/MySQL/PostgreSQL 全部通过（6.410s），结束后只删除随机前缀的表 |
+| 修改文件检查 | Alibaba 插件单独 `node --check`、oxlint、oxfmt 均通过；修改的 Go 文件已 `gofmt`；`git diff --check` 通过。上游全树 `lint:plugins` 的 4 errors/13 warnings 与 hailuo/kling/vidu/xai 的既存格式问题不在本轮修改文件内，未扩大清理范围 |
+| 0.17.0 镜像 | `./scripts/build-image.sh` 成功，生成 `new-api-daily-limit:{0.17.0,local}` 与 `starbridge-gateway:{0.17.0,local}` 四个 tag；两个版本 tag 指向同一镜像 `sha256:b74e4a572116a268d51afbe945008607d7ce08f74997a13dc9b97c57bf233fff`，amd64/linux，316,019,680 bytes |
+| 镜像首启 | 用独立 compose project `new-api-017-smoke` 和全新数据库卷启动 0.17.0，Postgres/Redis/应用/sidecar 均 healthy；`/api/status` 返回 `version=0.17.0`，`/api/setup` 确认未初始化，向导建出的 root 角色为 100，登录通过 |
+| 日预算端到端 | `POC_POSTGRES_CONTAINER=starbridge-017-postgres node scripts/verify-daily-limit.mjs http://127.0.0.1:3810`：**38/38**。覆盖渠道/用户/分组预算、图片无 usage 请求、每 key 预算/RPM、冷却恢复、亲和、探测、外部状态、capacity 429 与自动禁用恢复；测试渠道和令牌均清理 |
+| 协议兼容 | `POC_POSTGRES_CONTAINER=starbridge-017-postgres node scripts/verify-compat.mjs http://127.0.0.1:3810`：**8/8**。OpenAI/Claude/Gemini/生图、未知模型 503、无效 key 401 与 Docker 网络内 sidecar 可达均通过；sidecar 返回业务 401 证明网络已到达，不冒充账号授权成功 |
+| 预算可观测性 | `POC_POSTGRES_CONTAINER=starbridge-017-postgres node scripts/verify-daily-observability.mjs http://127.0.0.1:3810`：**17/17**。单渠道快照、聚合列表、请求/拒绝计数与限额一致，响应不含上游 key |
+| 渠道类型矩阵 | `POC_POSTGRES_CONTAINER=starbridge-017-postgres node scripts/verify-channel-types.mjs http://127.0.0.1:3810`：**17/17** 类型创建/更新适配；其中 **13/13** mock 可路由类型第二次请求均为 429 日限额。Zhipu/VertexAI/Codex/TaskPlugin 的 4 个已知 mock 协议缺口只跳过第二次请求，任何其它上游失败都会使脚本失败 |
+| 最小部署 | 全新 SQLite 容器、无 Redis：`node scripts/verify-minimal-deployment.mjs http://127.0.0.1:3811 starbridge-017-sqlite`：**10/10**。`/setup` 首启、管理员登录、渠道预算持久化、文本 token 预算和无 usage 图片请求预算均通过 |
+
+### 42.1 本轮修掉的实际缺陷
+
+1. **本地错误不再污染按 key 状态**：请求转换/校验等本地 429 曾被误记为上游限流，触发 key 冷却和失败计数。
+   改用上游 `RelayErrorSource(err) == "local"` 分类；红测先复现 `cooldown=60 / failure=1`，修复后本地错误为 0，
+   真实上游失败仍计 1，随后真实失败累计为 2。
+2. **百炼图片数量与交付 payload 不一致时保留预扣**：负数、小数、超界或与图片 payload 数量不一致的上报
+   不再进入结算。覆盖 immediate `UsageFacts`、submit adjustment 与 polled `UsageFacts`；红测先证明 reported=2
+   可进入三条路径，修复后全部拒绝。
+3. **任务私有数据不再丢字段**：`TaskPrivateData.Value()` 的空值判断遗漏 `ChannelKeyIndex` 与
+   `CredentialAccount`，两者单独存在时会被序列化为 NULL。修复后三库重新读取均完整相等；这两个字段分别
+   用于按 key 结算，以及轮询/内容获取时的凭据账号。
+4. **日志重配释放旧 FD**：`SetupLogger()` 的空 `LogDir` 分支原先不关闭 `currentLogFile`，导致 Windows 临时
+   目录无法删除；现在清空路径、恢复 stdout/stderr 并关闭旧文件。空/非空分支统一持有 `setupLogLock`，
+   避免并发重配交错后泄漏新 FD。
+5. **测试隔离修复**：关闭被替换的 SQLite 审计连接；路由用例清空渠道缓存并关闭跨用例的 key 亲和；
+   HTTP/2 测试服务器在 GOAWAY 后保留旧连接到响应完成，避免 Windows 先收到 RST。定向复跑分别通过
+   （router `-count=3`、middleware `-count=3`、GOAWAY `-count=20`）。
+
+### 42.2 自审与边界
+
+只读审查覆盖按 key 错误记账、Alibaba usage、任务持久化、日志生命周期、路由亲和与 GOAWAY，结论为
+**无 Critical / Important**。其提出的三项 Minor（固定 channel ID 跨 `-count` 残留、日志空分支未加锁、
+数据库测试固定表前缀）已全部修复并复验。请求级 `ingressRan` 不会阻止 late-only 插件跨渠道尝试重复执行，
+未按误报修改生产代码。
+
+首次烟测复用旧 PoC 数据卷时发生 Postgres 口令不匹配；旧卷和旧容器均未修改或删除，改用独立 project 与
+全新卷后完成上述验证。Windows Git Bash 曾把 `SQLITE_PATH=/data/...` 改写成宿主机路径，使用
+`MSYS_NO_PATHCONV=1` 后最小部署通过；这是本地命令环境问题，不是镜像缺陷。
+
+仍未验证：真实 Kiro/Antigravity 账号、真实国内厂商/生图 Key、真实出图；这些需要外部凭据。公开
+快照/tag/CI 与香港生产升级在发布阶段单独记录，不在本章冒充已完成。

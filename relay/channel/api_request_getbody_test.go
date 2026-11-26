@@ -390,7 +390,13 @@ func runGoAwayAfterFirstRequestServer(ln net.Listener) <-chan h2ServerResult {
 	resCh := make(chan h2ServerResult, 1)
 	go func() {
 		res := h2ServerResult{}
-		defer func() { resCh <- res }()
+		var connections []net.Conn
+		defer func() {
+			for _, conn := range connections {
+				_ = conn.Close()
+			}
+			resCh <- res
+		}()
 
 		for attempt := range 2 {
 			conn, framer, err := acceptH2TestConnection(ln)
@@ -398,9 +404,9 @@ func runGoAwayAfterFirstRequestServer(ln net.Listener) <-chan h2ServerResult {
 				res.err = err
 				return
 			}
+			connections = append(connections, conn)
 			streamID, body, err := readH2TestRequest(framer)
 			if err != nil {
-				conn.Close()
 				res.err = err
 				return
 			}
@@ -408,18 +414,14 @@ func runGoAwayAfterFirstRequestServer(ln net.Listener) <-chan h2ServerResult {
 			res.attemptBodies = append(res.attemptBodies, body)
 
 			if attempt == 0 {
-				err = framer.WriteGoAway(0, http2.ErrCodeNo, nil)
-				conn.Close()
-				if err != nil {
+				if err := framer.WriteGoAway(0, http2.ErrCodeNo, nil); err != nil {
 					res.err = err
 					return
 				}
 				continue
 			}
 
-			err = writeH2TestResponse(framer, streamID)
-			conn.Close()
-			if err != nil {
+			if err := writeH2TestResponse(framer, streamID); err != nil {
 				res.err = err
 			}
 			return

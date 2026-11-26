@@ -7,7 +7,7 @@
 // Requires the PoC stack (or equivalent) and `node scripts/mock-upstream.cjs`
 // listening on the port MOCK_BASE points at.
 //
-//   node scripts/verify-daily-observability.mjs [base-url]
+//   POC_POSTGRES_CONTAINER=<container> node scripts/verify-daily-observability.mjs [base-url]
 const BASE = process.argv[2] || 'http://localhost:3800';
 import { adminCredentials } from './poc-credentials.mjs';
 const { user: ADMIN_USER, pass: ADMIN_PASS } = adminCredentials('verify-daily-observability.mjs');
@@ -73,7 +73,8 @@ record('token created', keyRes.json.success === true, keyRes.json.message || '')
 // The panel API only ever returns masked keys, so the plaintext key is read back
 // from the throwaway PoC database. Never do this against a real deployment.
 const { execFileSync } = await import('node:child_process');
-const psql = (sql) => execFileSync('docker', ['exec', 'new-api-poc-postgres', 'psql', '-U', 'newapi', '-d', 'new-api', '-At', '-c', sql], { encoding: 'utf8' }).trim();
+const postgresContainer = process.env.POC_POSTGRES_CONTAINER || 'new-api-poc-postgres';
+const psql = (sql) => execFileSync('docker', ['exec', postgresContainer, 'psql', '-U', 'newapi', '-d', 'new-api', '-At', '-c', sql], { encoding: 'utf8' }).trim();
 relayKey = psql(`select key from tokens where name = '${TOKEN_NAME}' and deleted_at is null order by id desc limit 1`);
 record('plaintext relay key read from the PoC database', relayKey.length > 20, `len=${relayKey.length}`);
 

@@ -93,7 +93,7 @@ func isCapacityRateLimit(err *types.NewAPIError) bool {
 // hammering it again. Only multi-key channels have a stable key index; the
 // channel status is deliberately untouched — a 429 is "slow down", not "broken".
 func MarkKeyRateLimited(relayInfo *relaycommon.RelayInfo, err *types.NewAPIError) {
-	if relayInfo == nil || !relayInfo.ChannelIsMultiKey || err == nil {
+	if relayInfo == nil || !relayInfo.ChannelIsMultiKey || err == nil || RelayErrorSource(err) == "local" {
 		return
 	}
 	if err.StatusCode != http.StatusTooManyRequests {
@@ -219,7 +219,7 @@ func keyAdmits(channel *model.Channel, setting dto.ChannelSettings, keyIndex int
 // RecordKeyFailure counts one upstream failure against the key that produced it.
 // It answers "is this credential flaky?" without querying the log database.
 func RecordKeyFailure(relayInfo *relaycommon.RelayInfo, err *types.NewAPIError) {
-	if relayInfo == nil || !relayInfo.ChannelIsMultiKey || err == nil {
+	if relayInfo == nil || !relayInfo.ChannelIsMultiKey || err == nil || RelayErrorSource(err) == "local" {
 		return
 	}
 	if err.StatusCode > 0 && err.StatusCode < 400 {

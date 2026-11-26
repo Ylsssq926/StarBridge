@@ -1,4 +1,4 @@
-# 星桥 StarBridge · New API 国内模型网关（成品说明 v0.16.0 · 上游基线 upstream/main@b388140ac）
+# 星桥 StarBridge · New API 国内模型网关（成品说明 v0.17.0 · 上游基线 upstream/main@6627f0e3）
 
 ## 名称与来源
 
@@ -48,7 +48,9 @@
 | `patches/series/` | **主机制**：由分支提交生成的 patch series（`git am -3` 重放） |
 | `patches/legacy/` | pre-commit 基线的手工 file patch，仅供 `USE_SERIES=0` 回退与历史对照 |
 
-已构建镜像（按上游 `upstream/main@b388140ac` 源码）：`new-api-daily-limit:{0.16.0,local}`，别名 `starbridge-gateway:{0.16.0,local}`（含 `LICENSE`、`NOTICE`、`THIRD-PARTY-LICENSES.md`；容器 `/api/status` 自报 `version: 0.16.0`）。版本 tag 不可变：内容变化必须升 `PRODUCT_VERSION`。
+已构建镜像（按上游 `upstream/main@6627f0e3` 源码）：`new-api-daily-limit:{0.17.0,local}`，别名 `starbridge-gateway:{0.17.0,local}`（含 `LICENSE`、`NOTICE`、`THIRD-PARTY-LICENSES.md`；镜像 `sha256:b74e4a572116…`，amd64/linux，316,019,680 bytes）。版本 tag 不可变：内容变化必须升 `PRODUCT_VERSION`。
+
+0.17.0 镜像已在独立本地栈完成首启，`/api/status` 返回 `version=0.17.0`，管理员向导和登录通过。端到端结果为日预算 **38/38**、协议兼容 **8/8**、可观测性 **17/17**、渠道类型适配 **17/17**（mock 可路由类型限额 **13/13**）、无 Redis 的 SQLite 最小部署 **10/10**。
 
 ## 每日预算的三层（0.7.0 起）
 
@@ -146,7 +148,7 @@ docker compose -f docker-compose.poc.yml up -d
 
 ## 迭代规划
 
-详见 [docs/ITERATION_PLAN.md](docs/ITERATION_PLAN.md)。当前 v0.16.0（上游基线 `upstream/main@b388140ac`）已完成：
+详见 [docs/ITERATION_PLAN.md](docs/ITERATION_PLAN.md)。当前 v0.17.0（上游基线 `upstream/main@6627f0e3`）已完成：
 
 - 上游基线重建
 - 日限额后端 + 前端 + 测试（Token 预算与请求数预算两个维度，含生图/按次计费任务）
@@ -161,9 +163,11 @@ docker compose -f docker-compose.poc.yml up -d
 - 三条旁路容器验证
 - 内置阿里图片插件 mock 验证
 - compose 起停与容器网络验证
-- patch 跨 rc.46 / rc.47 / main 重放验证；跟进收敛为一条 `drill` 命令。2026-11-14 跟进上游 rc.48–rc.51，
-  以 `upstream/main@b388140ac` 为新基线重放 102/102（38 个上游提交）；人工解冲突 5 处
-  （渠道过滤器/设置/query key/任务记账取并集，`UpdateChannelStatus` 回调签名适配），门禁全绿
+- patch 跨 rc.46 / rc.47 / main 重放验证；跟进收敛为一条 `drill` 命令。2026-11-25 跟进最新 main，
+  以 `upstream/main@6627f0e3` 为新基线重放 103/103（29 个上游提交、136 个上游文件变化），
+  保留上游缓存、插件市场与请求插件行为，并完成全量后端、前端和三库回归
+- 本地请求错误不再进入按 key 冷却/失败计数；百炼图片 usage 与实际交付数量不一致时保留预扣；
+  任务私有数据完整持久化按 key 索引与凭据账号
 - 备份恢复演练（Postgres：转储 → 旁路库恢复 → 逐表行数比对 → 用恢复库起服务探活）
 - 跨平台门禁（Linux 容器内重跑工具层与后端回归）
 
@@ -189,9 +193,9 @@ docker compose -f docker-compose.poc.yml up -d
 
 - 新鲜 worktree 从当前基线（`upstream-sync.sh base`）重放补丁 → 前端构建 + 类型检查 + 后端回归全通过；在 `v1.0.0-rc.47` 上的实测见 `docs/VERIFICATION.md` §21。
 - 日限额 14 项边界检查在三种运行形态下均 14/14：内存缓存选路、数据库选路、未启用 Redis（进程内回退）。
-- 协议/接线兼容 7 项全通过：OpenAI、Claude、Gemini 三种入站格式 + 生图 + 错误语义（503 与 429 区分）+ 无效令牌 + 旁路可达。
-- 逐上游类型：17/17 类型面板适配、15/15 可路由类型到顶 429（含 58/59/60 旁路类型与 62/63 推理框架）。
-- 三库与首启：SQLite、MySQL 8.4 各 10/10（无 Redis、无内存缓存的最小部署形态），Postgres 由常驻 PoC 栈覆盖；`/setup` 向导建出的首个账号即管理员，无需手工提权。
+- 协议/接线兼容 8 项全通过：OpenAI、Claude、Gemini 三种入站格式 + 生图 + 错误语义（503 与 429 区分）+ 无效令牌 + 旁路可达。
+- 逐上游类型：17/17 类型面板适配、13/13 个 mock 可路由类型到顶 429（含 58/59/60 旁路类型与 62/63 推理框架）；4 个已知 mock 协议缺口不冒充限额已测。
+- 三库与首启：真实 SQLite/MySQL/PostgreSQL 回归矩阵通过；0.17.0 另在无 Redis 的全新 SQLite 容器完成首启与预算验证 10/10，Postgres 镜像栈完成 38/38 日预算验证；`/setup` 向导建出的首个账号即管理员，无需手工提权。
 - 发布门禁已落成 `.github/workflows/product-gates.yml`，其等价命令在本地演练通过。
 - 文档自身也过了"主张 vs 证据"审计（`docs/VERIFICATION.md` §12）：过期数字、凭记忆写的面板地图、含糊的时序说法都改成了实测值。
 

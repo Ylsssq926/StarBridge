@@ -33,7 +33,7 @@
 | `/users` `/redemption-codes` `/subscriptions` `/wallet` | 用户、兑换码、订阅、额度/支付 | 运营 |
 | `/keys` 之外还有 `/profile` | 个人资料、密码、2FA、Passkey、OAuth 绑定 | 账号自助 |
 | `/chat`、`/chat2link` | 内置会话与第三方客户端跳转配置 | 给使用者直接试 |
-| `/system-info` | 版本、数据库/缓存状态、性能 | 确认补丁版本（成品 0.5.0 显示 `0.5.0`） |
+| `/system-info` | 版本、数据库/缓存状态、性能 | 确认补丁版本（成品 0.17.0 显示 `0.17.0`） |
 | `/pricing`、`/pricing/<modelId>`、`/rankings`（公开） | 对外价格页与排行 | 客户端选型用 |
 
 > 表格来自 `web/src/routes/` 的实际路由与各界面 `section-registry.tsx` 的分节 id，不是照抄上游 README；系统设置页大多带 `$section` 子路径，例如实测见过的 `/system-settings/request-policies/routing`。
@@ -298,11 +298,11 @@ git grep -nE "(ADMIN_PASS|PASSWD|PASSWORD|SECRET)[A-Za-z_]*(\|\||=) *'[^']{6,}'|
 
 | 事项 | 现状与操作 |
 |---|---|
-| 本地目录（**只有一个**） | `F:\Project\new-api` 是唯一目录，当前检出 `dev`（开发线，带完整历史，成品 0.16.0）。历史分支 `product/daily-limit`（rc.46 冻结线）与 `rehearsal-rc47` 只作为分支存在，不占目录。**不要手工 `git worktree add` 第二份长期检出**（2026-10-27 就因为这样出现过三个同名目录，见 `docs/VERIFICATION.md` §27）；演练新 tag 时 `drill` 自己建 `../new-api-<tag>` 临时工作树，用完删掉。判断自己在哪：`git branch --show-current` + `./scripts/upstream-sync.sh base` |
+| 本地目录（**只有一个**） | `F:\Project\new-api` 是唯一目录，当前检出 `dev`（开发线，带完整历史，成品 0.17.0）。历史分支 `product/daily-limit`（rc.46 冻结线）与 `rehearsal-rc47` 只作为分支存在，不占目录。**不要手工 `git worktree add` 第二份长期检出**（2026-10-27 就因为这样出现过三个同名目录，见 `docs/VERIFICATION.md` §27）；演练新 tag 时 `drill` 自己建 `../new-api-<tag>` 临时工作树，用完删掉。判断自己在哪：`git branch --show-current` + `./scripts/upstream-sync.sh base` |
 | 远端与分支（**对外只有 main**） | `starbridge` = 公开仓库，默认分支 **`main`**：**单提交起始的快照线**，只放"能直接部署的最终版"，没有开发历史。开发线 `dev` **不推送到远端**（`drill`/`export-series` 依赖它的上游祖先链）。发布只需 `./scripts/publish-snapshot.sh`：把 dev 的树压成一个快照提交，追加在 main 上并 push（fast-forward，不需要强推），必要时打 `v<版本>` tag。`origin` 仍指上游 `QuantumNous/new-api`，**永远不要往它推** |
-| 发行 tag | 最新 **`starbridge-0.16.0`**（annotated，指向 main 的快照提交）。上游的 `v1.0.0-rc.*` 不往本仓复制：重放基线由同步脚本从 upstream remote 取，所以 CI 不能假设检出自带 tag（见 `docs/VERIFICATION.md` §19）。查看：`git ls-remote --tags starbridge` |
+| 发行 tag | 最新 **`starbridge-0.17.0`**（annotated，指向 main 的快照提交）。上游的 `v1.0.0-rc.*` 不往本仓复制：重放基线由同步脚本从 upstream remote 取，所以 CI 不能假设检出自带 tag（见 `docs/VERIFICATION.md` §19）。查看：`git ls-remote --tags starbridge` |
 | 分支保护（**只保护 main**） | `main` 上已开：禁 force-push、禁删除分支、对 admin 生效；**不**要求 PR、**不**要求必需状态检查。因为发布是"追加提交"而不是强推，保护不会挡住 `publish-snapshot.sh`。开：`gh api -X PUT repos/Ylsssq926/StarBridge/branches/main/protection` 传 `{"required_status_checks":null,"enforce_admins":true,"required_pull_request_reviews":null,"restrictions":null,"allow_force_pushes":false,"allow_deletions":false}`；回退：同路径 `DELETE`；查看：同路径 `GET` |
-| 门禁怎么跑 | 只有 `.github/workflows/product-gates.yml` 是我们自己的门：`backend` / `frontend` 在每个分支都跑；`sync-integrity`（补丁重放+覆盖校验）**只在 `dev` 跑**，因为 `main` 是根提交快照、没有上游祖先，series 模型对它不成立（实测 main 上会导出 1 patch / 2703 文件而必然报错）；上游 `ci.yml` 的 `CI` 也会跑，两边互补。它的 push 触发条件是 **`product/*` 通配**，所以换基线开新分支不需要再改 workflow（写死分支名的话，新主线上的推送会静默不跑门）。手动触发：`gh workflow run product-gates.yml --repo Ylsssq926/StarBridge --ref <分支>`（注意用**文件名**不是显示名，并显式给 `--repo`，否则 `gh` 会解析到 `origin`） |
+| 门禁怎么跑 | 只有 `.github/workflows/product-gates.yml` 是我们自己的门：`backend` / `frontend` 在每个分支都跑；`sync-integrity`（补丁重放+覆盖校验）**只在 `dev` 跑**，因为 `main` 是根提交快照、没有上游祖先，series 模型对它不成立（实测 main 上会导出 1 patch / 2703 文件而必然报错）；上游 `ci.yml` 的 `CI` 也会跑，两边互补。它的 push 触发分支是 **`main` / `dev`**；手动触发：`gh workflow run product-gates.yml --repo Ylsssq926/StarBridge --ref <分支>`（注意用**文件名**不是显示名，并显式给 `--repo`，否则 `gh` 会解析到 `origin`） |
 | 上游那 5 条发布类工作流已禁用 | `Publish Docker image (Multi-arch)`、`Publish Docker image (manual branch)`、`Build Electron App`、`Release (Linux, macOS, Windows)`、`Sync Release to GitCode` 都继承自上游，在 tag 或手动触发时会尝试用**本仓**的 secrets 推镜像 / 发 release。我们不用它们（成品走 `docker save` 的 tar，见 `docs/DEPLOY.md`），2026-10-26 已用 `gh api -X PUT repos/Ylsssq926/StarBridge/actions/workflows/<id>/disable` 全部置为 `disabled_manually`，实测复核 5 条全为 disabled、我们自己的三条仍 active。**恢复**用同路径的 `/enable`。文件仍留在树里（不扩大重放冲突面），但 GitHub 不执行；注意它们占着 tag 触发的"坑位"，如果哪天启用了再打 tag，会立刻跑 |
 | Dependabot | 上游带来的 `.github/dependabot.yml`（每周对 `/web` 开依赖升级 PR）**已删除**：对外 `main` 是生成出来的快照分支，合进去的依赖改动会被下一次发布覆盖，PR 只会制造噪声（2026-10-27 清空远端时 5 个 PR 被连带关闭，机器人还发了一条"不再提醒"的自动评论）。依赖升级改在开发线手动做：`cd web && bun update <pkg>` → 本地门禁 → 提交到 `dev` → 发布快照。仓库层面的**安全告警**（secret scanning / 依赖漏洞）不受影响，仍会用默认分支扫描；恢复版本升级就恢复该文件（注意它会再次对 `main` 开 PR） |
 | 定时演练 | `upstream-drill.yml`（**每周日 03:00 UTC**，不是每月——上游实测 4~5 天一个 rc；`continue-on-error: true`，结论写进 job summary 与 `drill-log` 产物）。注册时机很反直觉：**只有推一个改动该文件的提交，GitHub 才把它列进 `GET /actions/workflows`**——第一次推送后它才出现并可 `gh workflow run`。已实测两次（run `40191317746` 暴露日志位置错误、`40191784310` 正常报告 `overlap 19 file(s)` 与 `conflicted files: model/channel_constraint.go`）。看结论不要看 job 颜色（它按设计永远绿），看 `drill_exit=` 与 summary 里的 `DRILL OK/FAILED` |

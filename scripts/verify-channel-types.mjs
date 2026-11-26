@@ -2,11 +2,13 @@
 // For every channel type we wire, verify that the panel can create/update the
 // channel with daily_token_limit set, that the value survives the update path,
 // and that our field never changes the type's own validation result.
-// Usage: node scripts/verify-channel-types.mjs [base_url]
+// Usage: POC_POSTGRES_CONTAINER=<container> node scripts/verify-channel-types.mjs [base_url]
 const BASE = process.argv[2] || 'http://localhost:3800';
 import { adminCredentials } from './poc-credentials.mjs';
 const { user: ADMIN_USER, pass: ADMIN_PASS } = adminCredentials('verify-channel-types.mjs');
 const MOCK_BASE = 'http://host.docker.internal:3999';
+const TOKEN_NAME = 'verify-channel-types';
+const MOCK_UNSUPPORTED_TYPES = new Set([16, 41, 57, 61]);
 
 // type id -> label; includes every upstream this product uses.
 const TYPES = [
@@ -32,6 +34,8 @@ const TYPES = [
 // Type-specific required config, so these upstreams are tested with a channel
 // the console actually accepts.
 const TYPE_EXTRA = {
+  41: { other: JSON.stringify({ default: 'us-central1' }) },
+  57: { key: JSON.stringify({ access_token: 'mock-access-token', account_id: 'mock-account' }) },
   58: {
     settings: JSON.stringify({
       advanced_custom: {
@@ -104,6 +108,8 @@ async function createChannel(name, type, setting) {
       weight: 0,
       status: 1,
       setting: mergedSetting,
+      ...(extra.key ? { key: extra.key } : {}),
+      ...(extra.other ? { other: extra.other } : {}),
       ...(extra.settings ? { settings: extra.settings } : {}),
     },
   };
@@ -157,10 +163,11 @@ async function main() {
     } else {
       const saved = hasLimit(withLimit.channel);
       // Update an unrelated field through the panel API and re-read.
-      await api('/api/channel/', { method: 'PUT', body: { id: withLimit.channel.id, weight: 5 } });
+      const update = await api('/api/channel/', { method: 'PUT', body: { id: withLimit.channel.id, weight: 5 } });
       const after = (await listChannels()).find((c) => c.id === withLimit.channel.id);
       const survived = after ? hasLimit(after) : false;
-      let detail = `create=${saved} after-update=${survived}`;
+      const updateOk = update.json.success === true;
+      let detail = `create=${saved} update=${updateOk} after-update=${survived}`;
       let pairOk = true;
       if (TYPE_EXTRA[type]?.taskPluginKey && after) {
         const parsed = JSON.parse(after.setting || '{}');
@@ -170,7 +177,7 @@ async function main() {
       rows.push({
         type,
         label,
-        result: saved && survived && pairOk ? 'ok' : 'BROKEN',
+        result: saved && updateOk && survived && pairOk ? 'ok' : 'BROKEN',
         detail,
       });
       if (saved && survived && pairOk) limited.push({ id: withLimit.channel.id, type, label });
@@ -184,7 +191,11 @@ async function main() {
   console.log('type | label | result | detail');
   for (const r of rows) console.log(`${String(r.type).padStart(4)} | ${r.label.padEnd(14)} | ${r.result.padEnd(7)} | ${r.detail}`);
 
-  const broken = rows.filter((r) => r.result === 'BROKEN' || r.result === 'DIFFERS');
+  const broken = rows.filter((r) => r.result !== 'ok');
+  let capFails = 0;
+  let capUnexpectedFails = 0;
+  let capChecked = 0;
+  let capSkipped = 0;
   console.log(
     `\n${rows.length - broken.length}/${rows.length} types adapted (${limited.length} kept for the cap test)`
   );
@@ -194,14 +205,19 @@ async function main() {
   if (limited.length) {
     const { execFileSync } = await import('node:child_process');
     const container = process.env.POC_POSTGRES_CONTAINER || 'new-api-poc-postgres';
+    await api('/api/token/', { method: 'POST', body: { name: TOKEN_NAME, expired_time: -1, unlimited_quota: true } });
     const raw = execFileSync(
       'docker',
-      ['exec', container, 'psql', '-U', 'newapi', '-d', 'new-api', '-tAc', "select key from tokens where name = 'verify-daily-limit' and deleted_at is null order by id desc limit 1"],
+      ['exec', container, 'psql', '-U', 'newapi', '-d', 'new-api', '-tAc', `select key from tokens where name = '${TOKEN_NAME}' and deleted_at is null order by id desc limit 1`],
       { encoding: 'utf8' },
     ).trim();
     const apiKey = raw.startsWith('sk-') ? raw.slice(3) : raw;
     if (!apiKey) {
-      console.error('no plaintext token key; run scripts/verify-daily-limit.mjs first');
+      const tokenHits = await api(`/api/token/search?keyword=${encodeURIComponent(TOKEN_NAME)}`);
+      for (const stale of tokenHits.json.data?.items || []) {
+        if (stale?.name === TOKEN_NAME) await api(`/api/token/${stale.id}`, { method: 'DELETE' });
+      }
+      console.error('no plaintext token key; set POC_POSTGRES_CONTAINER');
       process.exit(1);
     }
     await new Promise((r) => setTimeout(r, 7000));
@@ -216,7 +232,6 @@ async function main() {
     };
 
     console.log('\ntype | label | routable | capped');
-    let capFails = 0;
     for (const ch of limited) {
       const first = await call(ch.type);
       // Usage is written during settlement, after the response is flushed.
@@ -224,12 +239,21 @@ async function main() {
       const second = await call(ch.type);
       const blocked = second.status === 429 && /daily_token_limit_exceeded/.test(second.body);
       if (first.status !== 200) {
-        // The mock upstream does not implement every provider's path shape;
-        // that is a harness gap, not a gateway defect.
-        console.log(
-          `${String(ch.type).padStart(4)} | ${ch.label.padEnd(14)} | ${first.status} (mock upstream path not implemented, cap not asserted)`
-        );
+        // Only the known mock/provider mismatches may skip the second request.
+        if (MOCK_UNSUPPORTED_TYPES.has(ch.type)) {
+          capSkipped += 1;
+          console.log(
+            `${String(ch.type).padStart(4)} | ${ch.label.padEnd(14)} | ${first.status} (known mock upstream gap, cap not asserted) body=${first.body.slice(0, 70)}`
+          );
+        } else {
+          capFails += 1;
+          capUnexpectedFails += 1;
+          console.log(
+            `${String(ch.type).padStart(4)} | ${ch.label.padEnd(14)} | ${first.status} (unexpected upstream failure) body=${first.body.slice(0, 70)}`
+          );
+        }
       } else {
+        capChecked += 1;
         if (!blocked) capFails += 1;
         console.log(
           `${String(ch.type).padStart(4)} | ${ch.label.padEnd(14)} | ${first.status} | ${second.status}${blocked ? ' (429 daily)' : ` body=${second.body.slice(0, 70)}`}`
@@ -237,11 +261,19 @@ async function main() {
       }
       await api(`/api/channel/${ch.id}`, { method: 'DELETE' });
     }
-    console.log(`\ncap enforcement: ${limited.length - capFails}/${limited.length} types`);
-    if (capFails) process.exit(1);
+    console.log(`\ncap enforcement: ${capChecked - (capFails - capUnexpectedFails)}/${capChecked} routable types (${capSkipped} known mock gaps, ${capUnexpectedFails} unexpected failures)`);
+
+    const tokenHits = await api(`/api/token/search?keyword=${encodeURIComponent(TOKEN_NAME)}`);
+    for (const stale of tokenHits.json.data?.items || []) {
+      if (stale?.name === TOKEN_NAME) await api(`/api/token/${stale.id}`, { method: 'DELETE' });
+    }
+    const tokenLeft = await api(`/api/token/search?keyword=${encodeURIComponent(TOKEN_NAME)}`);
+    const liveTokens = (tokenLeft.json.data?.items || []).filter((t) => t?.name === TOKEN_NAME);
+    console.log(`${liveTokens.length === 0 ? 'PASS' : 'FAIL'}  token cleaned up — left=${liveTokens.length}`);
+    if (liveTokens.length) capFails += 1;
   }
 
-  process.exit(broken.length ? 1 : 0);
+  process.exit(broken.length || capFails ? 1 : 0);
 }
 
 main().catch((err) => {

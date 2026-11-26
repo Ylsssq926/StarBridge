@@ -36,7 +36,7 @@ docker compose -f docker-compose.poc.yml up -d
 ```
 
 完整步骤（含"服务器上没有 Go/Bun 时怎么搬镜像"、反代与 TLS、升级回滚）见 **`docs/DEPLOY.md`**。
-镜像：`new-api-daily-limit:{0.16.0,local}`、`starbridge-gateway:{0.16.0,local}`。
+镜像：`new-api-daily-limit:{0.17.0,local}`、`starbridge-gateway:{0.17.0,local}`。
 
 ## 仓库怎么组织
 
@@ -44,17 +44,17 @@ docker compose -f docker-compose.poc.yml up -d
 |---|---|
 | `main`（默认分支） | **发布快照**：单个提交，只放能直接部署的成品，没有开发历史 |
 | 本地 `dev`（不公开） | 开发线，保留完整上游祖先链；`drill`/`export-series` 依赖它 |
-| `starbridge-0.16.0` | 最新发行 tag，指向 `main` 的唯一提交 |
+| `starbridge-0.17.0` | 最新发行 tag，指向 `main` 的唯一提交 |
 | `docs/` | `DEPLOY.md` 部署、`OPERATIONS.md` 面板与运维、`UPSTREAM_SYNC.md` 跟进上游、`VERIFICATION.md` 逐条证据、`PROVIDER_MATRIX.md` 旁路与渠道矩阵 |
 
 发布：`./scripts/publish-snapshot.sh`（把 `dev` 的树压成快照追加到 `main`）。
 
 ## 我们加了多少（相对上游）
 
-- 运行时 **26 个文件 `+869/−26`**：选路过滤器里加两条日预算、结算/提交钩子累加用量、
-  只读观测接口与路由、面板抽屉。
-- 测试 **6 个文件 `+464`**；运维脚本 **14 个 / 2473 行**（上游跟进、备份演练、跨平台门禁、
-  批量导入、快照发布）；文档 **8 份 / 1769 行**；自建 CI 门禁 2 条。
+- 运行时 **73 个文件 `+7076/−66`**：选路过滤器里加两层日预算、结算/提交钩子累加用量、
+  每 key 预算/RPM/冷却/亲和与状态接口、面板抽屉。
+- 测试 **16 个文件 `+1301/−16`**；运维脚本与部署配置 **19 个 / 3480 行**（上游跟进、备份演练、
+  跨平台门禁、批量导入、快照发布）；文档 **8 份 / 2217 行**；自建 CI **2 条 workflow / 4 个 job**。
 - 其余能力来自上游（40+ provider、计费/多租户、鉴权、任务插件）与旁路容器（各自的许可证见
   `docs/PROVIDER_MATRIX.md`）。**没有**把旁路源码并进本仓——这是为了每次上游发版都能低成本跟上。
 

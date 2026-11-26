@@ -13,10 +13,10 @@
 
 ```bash
 # 在开发机（装了 Go 1.26+ / Bun 1.4+ / Docker）
-./scripts/product.sh image                                  # 产物：new-api-daily-limit:0.16.0 等 4 个 tag
-docker save new-api-daily-limit:0.16.0 -o newapi-0.16.0.tar   # 实测约 71 MB
+./scripts/product.sh image                                  # 产物：new-api-daily-limit:0.17.0 等 4 个 tag
+docker save new-api-daily-limit:0.17.0 -o newapi-0.17.0.tar
 # 在服务器
-docker load -i newapi-0.16.0.tar
+docker load -i newapi-0.17.0.tar
 ```
 
 **B. 在服务器上构建**：装好 Go / Bun 后同样执行 `./scripts/product.sh image`。适合不方便传镜像的场景，

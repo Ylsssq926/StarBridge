@@ -826,6 +826,14 @@ type releasedAuditLog struct {
 
 func (releasedAuditLog) TableName() string { return "logs" }
 
+func closeAuditTestDatabase(t *testing.T, database *gorm.DB) {
+	t.Helper()
+	connection, err := database.DB()
+	if err == nil {
+		require.NoError(t, connection.Close())
+	}
+}
+
 // External tests create a new database per case on a loopback-only disposable
 // instance. They never drop databases or tables supplied through an environment variable.
 func newAuditTestDatabase(t *testing.T, kind, dsn string) (*gorm.DB, string) {
@@ -834,6 +842,7 @@ func newAuditTestDatabase(t *testing.T, kind, dsn string) (*gorm.DB, string) {
 		path := t.TempDir() + "/audit.db"
 		db, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
 		require.NoError(t, err)
+		t.Cleanup(func() { closeAuditTestDatabase(t, db) })
 		return db, path
 	}
 	require.NotEmpty(t, dsn)
@@ -879,12 +888,7 @@ func newAuditTestDatabase(t *testing.T, kind, dsn string) (*gorm.DB, string) {
 	db, err := gorm.Open(isolated, &gorm.Config{})
 	require.NoError(t, err)
 	t.Logf("isolated database: %s (%s)", name, kind)
-	t.Cleanup(func() {
-		connection, err := db.DB()
-		if err == nil {
-			_ = connection.Close()
-		}
-	})
+	t.Cleanup(func() { closeAuditTestDatabase(t, db) })
 	return db, newDSN
 }
 
@@ -1075,9 +1079,21 @@ func TestAuditDatabaseMatrix(t *testing.T) {
 						require.NoError(t, db.Create(&releasedAuditLog{UserId: 1, Type: model.LogTypeLogin, Content: "historical login", CreatedAt: 100, RequestId: "legacy-request"}).Error)
 					}
 					for range 2 {
+						previous := model.DB
 						require.NoError(t, model.InitDB())
+						if previous != db && previous != model.DB {
+							closeAuditTestDatabase(t, previous)
+						}
 						require.NoError(t, model.InitLogDB())
 					}
+					t.Cleanup(func() {
+						if model.DB != db {
+							closeAuditTestDatabase(t, model.DB)
+						}
+						if model.LOG_DB != db && model.LOG_DB != model.DB {
+							closeAuditTestDatabase(t, model.LOG_DB)
+						}
+					})
 					if !upgrade {
 						require.NoError(t, db.Create(&model.User{Username: "fresh-owner", Password: "placeholder", AffCode: "fresh-aff"}).Error)
 					}

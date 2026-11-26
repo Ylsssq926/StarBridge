@@ -1,9 +1,15 @@
 package service
 
 import (
+	"errors"
+	"net/http"
+	"sync/atomic"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -14,6 +20,35 @@ func channelWithExternalStates(t *testing.T, raw string) *model.Channel {
 	channel := &model.Channel{Id: 1, Setting: &setting}
 	require.NotPanics(t, func() { channel.GetSetting() })
 	return channel
+}
+
+var keyFailureTestChannelID atomic.Int64
+
+func TestKeyFailureAccountingIgnoresLocalErrors(t *testing.T) {
+	previousRedis, previousOptions := common.RedisEnabled, common.OptionMap
+	common.RedisEnabled = false
+	common.OptionMap = map[string]string{KeyRateLimitCooldownOptionKey: "60"}
+	t.Cleanup(func() {
+		common.RedisEnabled = previousRedis
+		common.OptionMap = previousOptions
+	})
+
+	channelID := 910027 + int(keyFailureTestChannelID.Add(1))
+	const keyIndex = 0
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{ChannelId: channelID, ChannelIsMultiKey: true, ChannelMultiKeyIndex: keyIndex}}
+	localError := types.NewErrorWithStatusCode(errors.New("client image is invalid"), types.ErrorCodeConvertRequestFailed, http.StatusTooManyRequests)
+	MarkKeyRateLimited(info, localError)
+	RecordKeyFailure(info, localError)
+	assert.Zero(t, common.KeyCooldownRemainingSeconds(channelID, keyIndex))
+	assert.Zero(t, common.GetKeyDailyFailureCount(channelID, keyIndex))
+
+	upstreamRateLimit := types.NewOpenAIError(errors.New("rate limit exceeded"), types.ErrorCodeBadResponseStatusCode, http.StatusTooManyRequests)
+	MarkKeyRateLimited(info, upstreamRateLimit)
+	assert.Positive(t, common.KeyCooldownRemainingSeconds(channelID, keyIndex))
+
+	upstreamFailure := types.WithOpenAIError(types.OpenAIError{Message: "Incorrect API key provided", Type: "invalid_request_error", Code: "invalid_api_key"}, http.StatusUnauthorized)
+	RecordKeyFailure(info, upstreamFailure)
+	assert.EqualValues(t, 1, common.GetKeyDailyFailureCount(channelID, keyIndex))
 }
 
 func TestExternalKeyStateBlocks(t *testing.T) {

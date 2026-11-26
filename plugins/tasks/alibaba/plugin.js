@@ -761,7 +761,7 @@ function imageUsage(ctx, body) {
   let count;
   if (reported !== undefined) {
     // Do not let fractional, negative or oversized upstream counts change billing.
-    if (!Number.isInteger(reported) || reported < 0 || reported > MAX_IMAGE_OUTPUTS || (images.length && reported === 0))
+    if (!Number.isInteger(reported) || reported < 0 || reported > MAX_IMAGE_OUTPUTS || reported !== images.length)
       throw new Error("invalid upstream image count");
     count = reported;
   } else if (content.length) count = images.length;

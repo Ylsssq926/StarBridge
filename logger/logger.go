@@ -43,15 +43,14 @@ func SetupLogger() {
 	defer func() {
 		setupLogWorking = false
 	}()
+	if !setupLogLock.TryLock() {
+		log.Println(common.LogText("setup log is already working"))
+		return
+	}
+	defer func() {
+		setupLogLock.Unlock()
+	}()
 	if *common.LogDir != "" {
-		ok := setupLogLock.TryLock()
-		if !ok {
-			log.Println(common.LogText("setup log is already working"))
-			return
-		}
-		defer func() {
-			setupLogLock.Unlock()
-		}()
 		logPath := filepath.Join(*common.LogDir, fmt.Sprintf("oneapi-%s.log", time.Now().Format("20060102150405")))
 		fd, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
@@ -70,7 +69,22 @@ func SetupLogger() {
 			_ = oldFile.Close()
 		}
 		common.LogWriterMu.Unlock()
+		return
 	}
+
+	currentLogPathMu.Lock()
+	oldFile := currentLogFile
+	currentLogPath = ""
+	currentLogFile = nil
+	currentLogPathMu.Unlock()
+
+	common.LogWriterMu.Lock()
+	gin.DefaultWriter = os.Stdout
+	gin.DefaultErrorWriter = os.Stderr
+	if oldFile != nil {
+		_ = oldFile.Close()
+	}
+	common.LogWriterMu.Unlock()
 }
 
 func LogInfo(ctx context.Context, msg string) {

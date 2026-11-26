@@ -3,7 +3,9 @@ package model
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -13,7 +15,10 @@ import (
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/schema"
 )
 
 func TestMain(m *testing.M) {
@@ -101,6 +106,76 @@ func insertTask(t *testing.T, task *Task) {
 	task.CreatedAt = time.Now().Unix()
 	task.UpdatedAt = time.Now().Unix()
 	require.NoError(t, DB.Create(task).Error)
+}
+
+func TestUnfinishedTaskQueriesDatabaseMatrix(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			var driver gorm.Dialector
+			switch dialect {
+			case "sqlite":
+				driver = sqlite.Open(":memory:")
+			case "mysql":
+				dsn := os.Getenv("TEST_MYSQL_DSN")
+				if dsn == "" {
+					t.Skip("TEST_MYSQL_DSN is not configured")
+				}
+				driver = mysql.Open(dsn)
+			case "postgres":
+				dsn := os.Getenv("TEST_POSTGRES_DSN")
+				if dsn == "" {
+					t.Skip("TEST_POSTGRES_DSN is not configured")
+				}
+				driver = postgres.Open(dsn)
+			}
+			db, err := gorm.Open(driver, &gorm.Config{NamingStrategy: schema.NamingStrategy{TablePrefix: "task_polling_test_"}})
+			require.NoError(t, err)
+			sqlDB, err := db.DB()
+			require.NoError(t, err)
+			sqlDB.SetMaxOpenConns(1)
+			previousDB := DB
+			DB = db
+			t.Cleanup(func() {
+				DB = previousDB
+				assert.NoError(t, db.Migrator().DropTable(&Task{}))
+				assert.NoError(t, sqlDB.Close())
+			})
+			require.NoError(t, db.AutoMigrate(&Task{}))
+			var version string
+			versionQuery := "SELECT version()"
+			if dialect == "sqlite" {
+				versionQuery = "SELECT sqlite_version()"
+			}
+			require.NoError(t, db.Raw(versionQuery).Scan(&version).Error)
+			t.Logf("database version: %s", version)
+			assert.False(t, HasUnfinishedSyncTasks())
+
+			const cutoff int64 = 1_800_000_000
+			for _, status := range []TaskStatus{TaskStatusNotStart, TaskStatusSubmitted, TaskStatusQueued, TaskStatusInProgress, TaskStatusSuccess, TaskStatusFailure} {
+				for _, progress := range []string{"99%", "100%"} {
+					t.Run(string(status)+"/"+progress, func(t *testing.T) {
+						task := &Task{TaskID: "query_candidate", Status: status, Progress: progress, SubmitTime: cutoff - 1}
+						insertTask(t, task)
+						t.Cleanup(func() { assert.NoError(t, db.Delete(task).Error) })
+						unfinished := status != TaskStatusSuccess && status != TaskStatusFailure
+						assert.Equal(t, unfinished, HasUnfinishedSyncTasks())
+						if unfinished {
+							require.Len(t, GetAllUnFinishSyncTasks(1), 1)
+							assert.Equal(t, task.ID, GetAllUnFinishSyncTasks(1)[0].ID)
+							require.Len(t, GetTimedOutUnfinishedTasks(cutoff, 1), 1)
+							assert.Equal(t, task.ID, GetTimedOutUnfinishedTasks(cutoff, 1)[0].ID)
+						} else {
+							assert.Empty(t, GetAllUnFinishSyncTasks(1))
+							assert.Empty(t, GetTimedOutUnfinishedTasks(cutoff, 1))
+						}
+						require.NoError(t, db.Model(task).Update("submit_time", cutoff).Error)
+						assert.Empty(t, GetTimedOutUnfinishedTasks(cutoff, 1), "the timeout cutoff is exclusive")
+						assert.Equal(t, unfinished, HasUnfinishedSyncTasks())
+					})
+				}
+			}
+		})
+	}
 }
 
 func TestGetTaskForProtocolObservationScopesOwnerAndPlatform(t *testing.T) {
@@ -226,6 +301,78 @@ func TestSnapshot_Roundtrip(t *testing.T) {
 	assert.JSONEq(t, string(task.Data), string(snap.Data))
 	assert.Equal(t, task.PrivateData.PluginState, snap.PluginState)
 	assert.Equal(t, task.PrivateData.PollFailures, snap.PollFailures)
+}
+
+func TestTaskPrivateDataPersistsChannelIdentity(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			var driver gorm.Dialector
+			switch dialect {
+			case "sqlite":
+				driver = sqlite.Open(":memory:")
+			case "mysql":
+				dsn := os.Getenv("TEST_MYSQL_DSN")
+				if dsn == "" {
+					t.Skip("TEST_MYSQL_DSN is not configured")
+				}
+				driver = mysql.Open(dsn)
+			case "postgres":
+				dsn := os.Getenv("TEST_POSTGRES_DSN")
+				if dsn == "" {
+					t.Skip("TEST_POSTGRES_DSN is not configured")
+				}
+				driver = postgres.Open(dsn)
+			}
+			tablePrefix := fmt.Sprintf("task_private_test_%d_%d_", os.Getpid(), time.Now().UnixNano())
+			db, err := gorm.Open(driver, &gorm.Config{NamingStrategy: schema.NamingStrategy{TablePrefix: tablePrefix}})
+			require.NoError(t, err)
+			sqlDB, err := db.DB()
+			require.NoError(t, err)
+			sqlDB.SetMaxOpenConns(1)
+			t.Cleanup(func() {
+				assert.NoError(t, sqlDB.Close())
+			})
+			if dialect != "sqlite" {
+				databaseQuery := "SELECT current_database()"
+				if dialect == "mysql" {
+					databaseQuery = "SELECT DATABASE()"
+				}
+				var database string
+				require.NoError(t, db.Raw(databaseQuery).Scan(&database).Error)
+				if !strings.HasPrefix(database, "test_") && !strings.HasSuffix(database, "_test") && !strings.Contains(database, "_test_") {
+					t.Fatalf("refusing to use non-test database %q for %s", database, dialect)
+				}
+			}
+			t.Cleanup(func() {
+				assert.NoError(t, db.Migrator().DropTable(&Task{}))
+			})
+			require.NoError(t, db.AutoMigrate(&Task{}))
+			var version string
+			versionQuery := "SELECT version()"
+			if dialect == "sqlite" {
+				versionQuery = "SELECT sqlite_version()"
+			}
+			require.NoError(t, db.Raw(versionQuery).Scan(&version).Error)
+			t.Logf("database version: %s", version)
+
+			keyIndex := 0
+			for _, tc := range []struct {
+				name    string
+				private TaskPrivateData
+			}{
+				{name: "channel key index", private: TaskPrivateData{ChannelKeyIndex: &keyIndex}},
+				{name: "credential account", private: TaskPrivateData{CredentialAccount: "account-a"}},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					task := &Task{TaskID: "task_private_" + dialect + "_" + tc.name, Status: TaskStatusInProgress, PrivateData: tc.private, Data: json.RawMessage(`{}`)}
+					require.NoError(t, db.Create(task).Error)
+					var reloaded Task
+					require.NoError(t, db.First(&reloaded, task.ID).Error)
+					assert.Equal(t, tc.private, reloaded.PrivateData)
+				})
+			}
+		})
+	}
 }
 
 // ---------------------------------------------------------------------------

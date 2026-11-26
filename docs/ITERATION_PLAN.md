@@ -6,7 +6,7 @@
 依赖它把补丁重放到新 tag）；远端 `main` = **对外快照线**，已清空重建，起始只有**一个提交**，
 只放"能直接部署的成品"，没有开发历史。发布 = `./scripts/publish-snapshot.sh`：把 `dev` 的树压成
 一个快照提交追加到 `main` 并推送（fast-forward，不需要强推），同时打 `starbridge-<版本>` tag。
-基线 `upstream/main@b388140ac`（2026-11-14，跟进 rc.48–rc.51），成品版本 `0.16.0`；冻结的历史分支 `product/daily-limit`（rc.46/0.5.0）与
+基线 `upstream/main@6627f0e3`（2026-11-25，跟进最新 main），成品版本 `0.17.0`；冻结的历史分支 `product/daily-limit`（rc.46/0.5.0）与
 `rehearsal-rc47` 只作证据留在本地，不再提交。
 
 提交数、patch 数、以及"当前基线是谁"都不在本文固化（写成数字一定腐烂），用命令自取：
@@ -38,7 +38,7 @@ git push starbridge HEAD                          # 触发 Product Gates（produ
 （已进渠道抽屉面板）、JSON 批量导入渠道、GitHub hosted runner 上的三 job 门禁。
 逐条证据在 `docs/VERIFICATION.md` §3/§4/§14/§15/§16/§17/§18/§19/§20/§21/§22/§23/§24/§25。
 部署到服务器的路径单独写成 `docs/DEPLOY.md`（全新克隆 + 全新卷实测，含"服务器没有 Go/Bun 时怎么搬镜像"）；
-上游衔接的最近一次实测（2026-11-14）：上游已发 rc.48–rc.51，`upstream/main` 超前基线 38 个提交；我们按 main 重放 102/102 并锁定 `b388140ac`，人工解冲突 5 处（详见 `docs/VERIFICATION.md` §41）。此前 2026-11-03 曾按 main 重放 100/100 锁定 `45746ee`；更早 §25 记录：`upstream/main` 只超前 6 个提交且
+上游衔接的最近一次实测（2026-11-25）：`upstream/main` 超前旧基线 29 个提交、变化 136 个文件；我们按 main 重放 103/103 并锁定 `6627f0e3`，完成全量后端、前端与真实三库回归（详见 `docs/VERIFICATION.md` §42）。此前 2026-11-14 曾按 main 重放 102/102 锁定 `b388140ac`；2026-11-03 曾按 main 重放 100/100 锁定 `45746ee`；更早 §25 记录：`upstream/main` 只超前 6 个提交且
 **与我们零重叠文件**，67 个提交重放后门禁全过（`DRILL OK`）。
 
 仍未闭环、且不能由我自行闭环的一类：
@@ -207,7 +207,7 @@ daily-limit 15/15、备份演练 38 表一致且预算存活项非空跑），�
 
 ### 4.1 基线选择
 
-- 主基线：最新稳定 release tag；2026-11-14 跟进 rc.48–rc.51 后固定为 `upstream/main@b388140ac`（main 仅比 rc.51 多 2 个提交）
+- 主基线：最新稳定 release tag；2026-11-25 跟进最新 main 后固定为 `upstream/main@6627f0e3`
 - 预演基线：`upstream/main`
 - 禁止：继续在 2026-05 的旧 fork 上开发
 
